@@ -1,6 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, FileUp, Loader2, BarChart3, Download, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  FileUp,
+  Loader2,
+  BarChart3,
+  Download,
+  Trash2,
+} from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { createWorker } from "tesseract.js";
@@ -20,52 +27,134 @@ function normalizeNumber(n) {
   return num;
 }
 
-function extractGamesFromText(text) {
-  const cleaned = text
-    .replace(/[Oo]/g, "0")
-    .replace(/[Il|]/g, "1")
-    .replace(/[Ss]/g, "5")
-    .replace(/[^\d\n\r\t ]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function isNoiseLine(line) {
+  const l = String(line || "").toLowerCase();
 
-  const rawMatches = cleaned.match(/\b\d{1,2}\b/g) || [];
+  const blockedTerms = [
+    "concurso",
+    "situação",
+    "apost",
+    "pagamento",
+    "valor",
+    "total",
+    "data",
+    "hora",
+    "compra",
+    "pix",
+    "efetivada",
+    "meio de pagamento",
+    "canal de vendas",
+    "terminal",
+    "r$",
+    "rs",
+    "cpf",
+    "cnpj",
+    "autenticação",
+    "banco",
+    "agência",
+    "conta",
+    "debito",
+    "crédito",
+    "favorite",
+    "salvar carrinho",
+  ];
 
-  const numbers = rawMatches
-    .map((n) => Number(n))
-    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 60);
+  return blockedTerms.some((term) => l.includes(term));
+}
 
+function uniqueSortedGame(numbers) {
+  const normalized = numbers
+    .map(normalizeNumber)
+    .filter((n) => n !== null);
+
+  if (normalized.length !== 6) return null;
+  if (new Set(normalized).size !== 6) return null;
+
+  return [...normalized].sort((a, b) => a - b);
+}
+
+function extractGamesFromLines(lines) {
   const jogos = [];
-  let atual = [];
+  const seen = new Set();
 
-  for (const n of numbers) {
-    if (!atual.includes(n)) {
-      atual.push(n);
+  for (const originalLine of lines) {
+    const line = String(originalLine || "").replace(/\s+/g, " ").trim();
+    if (!line) continue;
+    if (isNoiseLine(line)) continue;
+
+    const nums = (line.match(/\b\d{1,2}\b/g) || [])
+      .map(Number)
+      .filter((n) => n >= 1 && n <= 60);
+
+    if (nums.length < 6) continue;
+
+    if (nums.length === 6) {
+      const jogo = uniqueSortedGame(nums);
+      if (!jogo) continue;
+
+      const key = jogo.join("-");
+      if (!seen.has(key)) {
+        seen.add(key);
+        jogos.push({ numeros: jogo, origem: line });
+      }
+      continue;
     }
 
-    if (atual.length === 6) {
-      jogos.push({ numeros: [...atual].sort((a, b) => a - b) });
-      atual = [];
+    if (nums.length > 6 && nums.length <= 8) {
+      for (let i = 0; i <= nums.length - 6; i++) {
+        const chunk = nums.slice(i, i + 6);
+        const jogo = uniqueSortedGame(chunk);
+        if (!jogo) continue;
+
+        const key = jogo.join("-");
+        if (!seen.has(key)) {
+          seen.add(key);
+          jogos.push({ numeros: jogo, origem: line });
+        }
+      }
     }
   }
 
   return jogos;
 }
 
-async function extractTextFromPdf(file) {
+async function extractLinesFromPdf(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-  let fullText = "";
+  const allLines = [];
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item) => item.str).join(" ");
-    fullText += " " + pageText;
+
+    const rows = new Map();
+
+    for (const item of textContent.items) {
+      const str = String(item.str || "").trim();
+      if (!str) continue;
+
+      const x = item.transform[4];
+      const y = Math.round(item.transform[5]);
+
+      if (!rows.has(y)) rows.set(y, []);
+      rows.get(y).push({ text: str, x });
+    }
+
+    const pageLines = [...rows.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([, items]) =>
+        items
+          .sort((a, b) => a.x - b.x)
+          .map((i) => i.text)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+      );
+
+    allLines.push(...pageLines);
   }
 
-  return fullText.trim();
+  return allLines;
 }
 
 async function renderPdfPagesToImages(file) {
@@ -93,27 +182,45 @@ async function renderPdfPagesToImages(file) {
   return images;
 }
 
+function extractLinesFromOcrText(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/[Oo]/g, "0")
+        .replace(/[Il|]/g, "1")
+        .replace(/[Ss]/g, "5")
+        .replace(/[^\dA-Za-zÀ-ÿ$:\- ]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Boolean);
+}
+
 async function extractTextWithOCR(file, setStatusText) {
-  setStatusText("PDF sem texto útil. Tentando OCR...");
+  setStatusText("PDF sem texto confiável. Tentando OCR...");
 
   const images = await renderPdfPagesToImages(file);
   const worker = await createWorker("eng");
 
   let fullText = "";
 
-  for (let i = 0; i < images.length; i++) {
-    setStatusText(`Rodando OCR na página ${i + 1} de ${images.length}...`);
-
+  try {
     await worker.setParameters({
-      tessedit_char_whitelist: "0123456789 \n",
+      tessedit_char_whitelist:
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÉÊÍÓÔÕÚÇàáâãéêíóôõúç $:-\n",
       preserve_interword_spaces: "1",
     });
 
-    const result = await worker.recognize(images[i]);
-    fullText += "\n" + result.data.text;
+    for (let i = 0; i < images.length; i++) {
+      setStatusText(`Rodando OCR na página ${i + 1} de ${images.length}...`);
+      const result = await worker.recognize(images[i]);
+      fullText += "\n" + result.data.text;
+    }
+  } finally {
+    await worker.terminate();
   }
 
-  await worker.terminate();
   return fullText.trim();
 }
 
@@ -124,71 +231,94 @@ export default function MegaSena() {
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
 
-  const canProcess = useMemo(() => file && sorteados.length === 6 && !loading, [file, sorteados, loading]);
+  const canProcess = useMemo(
+    () => file && sorteados.length === 6 && !loading,
+    [file, sorteados, loading]
+  );
 
-const processGames = useCallback(async () => {
-  if (!file || sorteados.length !== 6) return;
+  const processGames = useCallback(async () => {
+    if (!file || sorteados.length !== 6) return;
 
-  setLoading(true);
-  setResults(null);
-  setStatusText("Lendo texto do PDF...");
+    setLoading(true);
+    setResults(null);
+    setStatusText("Lendo linhas do PDF...");
 
-  try {
-    let text = await extractTextFromPdf(file);
+    try {
+      let jogos = [];
+      let sourceMode = "pdf-lines";
 
-    console.log("=== TEXTO PDFJS ===");
-    console.log(text);
+      const lines = await extractLinesFromPdf(file);
 
-    if (!text || text.replace(/\s/g, "").length < 20) {
-      text = await extractTextWithOCR(file, setStatusText);
+      console.log("=== LINHAS PDF ===");
+      console.log(lines);
 
-      console.log("=== TEXTO OCR ===");
-      console.log(text);
-    }
+      jogos = extractGamesFromLines(lines);
 
-    setStatusText("Interpretando jogos extraídos...");
+      console.log("=== JOGOS EXTRAÍDOS POR LINHA ===");
+      console.log(jogos);
 
-    const jogos = extractGamesFromText(text);
+      if (!jogos.length) {
+        sourceMode = "ocr";
+        const ocrText = await extractTextWithOCR(file, setStatusText);
 
-    console.log("=== JOGOS EXTRAÍDOS ===");
-    console.log(jogos);
+        console.log("=== TEXTO OCR ===");
+        console.log(ocrText);
 
-    if (!jogos.length) {
-      alert(
-        "Nenhum jogo encontrado. Abra o console do navegador com F12 e veja o texto extraído em 'TEXTO PDFJS' ou 'TEXTO OCR'."
+        const ocrLines = extractLinesFromOcrText(ocrText);
+
+        console.log("=== LINHAS OCR ===");
+        console.log(ocrLines);
+
+        jogos = extractGamesFromLines(ocrLines);
+
+        console.log("=== JOGOS EXTRAÍDOS OCR ===");
+        console.log(jogos);
+      }
+
+      if (!jogos.length) {
+        throw new Error("Nenhum jogo válido encontrado no comprovante.");
+      }
+
+      setStatusText(`Conferindo ${jogos.length} jogos encontrados...`);
+
+      const sorteadosSet = new Set(sorteados);
+
+      const analyzed = jogos.map((jogo, idx) => {
+        const nums = jogo.numeros || [];
+        const acertos = nums.filter((n) => sorteadosSet.has(n)).length;
+        return {
+          numeros: nums,
+          acertos,
+          index: idx + 1,
+          origem: jogo.origem || "",
+        };
+      });
+
+      analyzed.sort((a, b) => b.acertos - a.acertos || a.index - b.index);
+
+      const summary = {};
+      for (let i = 0; i <= 6; i++) {
+        summary[i] = analyzed.filter((j) => j.acertos === i).length;
+      }
+
+      setResults({
+        jogos: analyzed,
+        summary,
+        total: analyzed.length,
+        origem: sourceMode,
+      });
+
+      setStatusText(
+        `Conferência concluída. ${analyzed.length} jogos válidos encontrados.`
       );
-      throw new Error("Nenhum jogo encontrado no PDF.");
+    } catch (err) {
+      console.error(err);
+      alert("Erro: " + err.message);
+      setStatusText("");
+    } finally {
+      setLoading(false);
     }
-
-    const sorteadosSet = new Set(sorteados);
-
-    const analyzed = jogos.map((jogo, idx) => {
-      const nums = jogo.numeros || [];
-      const acertos = nums.filter((n) => sorteadosSet.has(n)).length;
-      return { numeros: nums, acertos, index: idx + 1 };
-    });
-
-    analyzed.sort((a, b) => b.acertos - a.acertos);
-
-    const summary = {};
-    for (let i = 0; i <= 6; i++) {
-      summary[i] = analyzed.filter((j) => j.acertos === i).length;
-    }
-
-    setResults({
-      jogos: analyzed,
-      summary,
-      total: analyzed.length,
-    });
-
-    setStatusText(`Conferência concluída. ${analyzed.length} jogos encontrados.`);
-  } catch (err) {
-    console.error(err);
-    setStatusText("");
-  } finally {
-    setLoading(false);
-  }
-}, [file, sorteados]);
+  }, [file, sorteados]);
 
   const clearFile = () => {
     setFile(null);
@@ -229,7 +359,8 @@ const processGames = useCallback(async () => {
           </div>
           <h1 className="text-4xl font-bold text-slate-900 mb-4">Mega Sena</h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Faça upload do seu comprovante, insira os números sorteados e confira seus jogos instantaneamente.
+            Faça upload do seu comprovante, insira os números sorteados e confira
+            seus jogos com leitura mais precisa por linha.
           </p>
         </div>
 
@@ -242,8 +373,12 @@ const processGames = useCallback(async () => {
               {!file ? (
                 <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-2xl p-10 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/30 transition">
                   <FileUp className="w-10 h-10 text-slate-400 mb-3" />
-                  <span className="text-slate-700 font-medium">Clique para selecionar o PDF</span>
-                  <span className="text-sm text-slate-500 mt-1">Somente arquivos PDF</span>
+                  <span className="text-slate-700 font-medium">
+                    Clique para selecionar o PDF
+                  </span>
+                  <span className="text-sm text-slate-500 mt-1">
+                    Somente arquivos PDF
+                  </span>
                   <input
                     type="file"
                     accept="application/pdf,.pdf"
@@ -307,12 +442,20 @@ const processGames = useCallback(async () => {
             <div id="resultado-conferencia" className="space-y-6">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Resumo da conferência</CardTitle>
+                  <div>
+                    <CardTitle>Resumo da conferência</CardTitle>
+                    <p className="text-sm text-slate-500 mt-1">
+                      Origem da leitura:{" "}
+                      {results.origem === "ocr" ? "OCR" : "Texto do PDF por linha"}
+                    </p>
+                  </div>
+
                   <Button variant="outline" onClick={exportAsImage}>
                     <Download className="w-4 h-4 mr-2" />
                     Baixar JPG
                   </Button>
                 </CardHeader>
+
                 <CardContent>
                   <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
                     {[6, 5, 4, 3, 2, 1, 0].map((acertos) => (
