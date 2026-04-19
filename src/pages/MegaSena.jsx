@@ -7,6 +7,8 @@ import {
   BarChart3,
   Download,
   Trash2,
+  Search,
+  RefreshCcw,
 } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
@@ -20,6 +22,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+const RESULT_SOURCES = [
+  {
+    latest: "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena",
+    byContest: (concurso) =>
+      `https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/${concurso}`,
+  },
+  {
+    latest: "https://api.guidi.dev.br/loteria/megasena/ultimo",
+    byContest: (concurso) =>
+      `https://api.guidi.dev.br/loteria/megasena/${concurso}`,
+  },
+];
 
 function normalizeNumber(n) {
   const num = Number(n);
@@ -53,7 +68,6 @@ function isNoiseLine(line) {
     "em processamento",
     "finalizada",
     "salvar carrinho como favorito",
-    "megasena",
     "mega-sena concurso",
     "concurso situação da aposta valor da aposta",
   ];
@@ -247,11 +261,47 @@ function shouldUseOcrFallback(pdfLines, jogosPdf) {
     return nums.length >= 6;
   });
 
-  if (linesWithManyNumbers.length && jogosPdf.length < linesWithManyNumbers.length / 2) {
+  if (
+    linesWithManyNumbers.length &&
+    jogosPdf.length < linesWithManyNumbers.length / 2
+  ) {
     return true;
   }
 
   return false;
+}
+
+function extractNumbersFromApiPayload(data) {
+  const candidates = [
+    data?.listaDezenas,
+    data?.dezenas,
+    data?.numeros,
+    data?.resultado,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      const nums = candidate
+        .map((n) => normalizeNumber(n))
+        .filter((n) => n !== null);
+
+      if (nums.length >= 6) {
+        return nums.slice(0, 6).sort((a, b) => a - b);
+      }
+    }
+
+    if (typeof candidate === "string") {
+      const nums = (candidate.match(/\b\d{1,2}\b/g) || [])
+        .map(Number)
+        .filter((n) => n >= 1 && n <= 60);
+
+      if (nums.length >= 6) {
+        return nums.slice(0, 6).sort((a, b) => a - b);
+      }
+    }
+  }
+
+  return [];
 }
 
 export default function MegaSena() {
@@ -260,11 +310,77 @@ export default function MegaSena() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
+  const [loadingResultado, setLoadingResultado] = useState(false);
+  const [concursoBusca, setConcursoBusca] = useState("");
 
   const canProcess = useMemo(
     () => file && sorteados.length === 6 && !loading,
     [file, sorteados, loading]
   );
+
+  const preencherResultado = async (mode, concurso = "") => {
+    setLoadingResultado(true);
+
+    try {
+      let lastError = null;
+
+      for (const source of RESULT_SOURCES) {
+        const url =
+          mode === "latest" ? source.latest : source.byContest(concurso);
+
+        try {
+          const response = await fetch(url, {
+            headers: {
+              Accept: "application/json",
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          console.log("=== RESULTADO API ===");
+          console.log(url, data);
+
+          const dezenas = extractNumbersFromApiPayload(data);
+
+          if (dezenas.length < 6) {
+            throw new Error("JSON sem dezenas válidas");
+          }
+
+          setSorteados(dezenas);
+          return;
+        } catch (err) {
+          console.error("Falha na fonte:", url, err);
+          lastError = err;
+        }
+      }
+
+      throw lastError || new Error("Nenhuma fonte retornou resultado válido.");
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível buscar o resultado automaticamente.");
+    } finally {
+      setLoadingResultado(false);
+    }
+  };
+
+  const buscarUltimoResultado = async () => {
+    await preencherResultado("latest");
+  };
+
+  const buscarPorConcurso = async () => {
+    const concurso = String(concursoBusca || "").trim();
+
+    if (!concurso) {
+      alert("Informe o número do concurso.");
+      return;
+    }
+
+    await preencherResultado("contest", concurso);
+  };
 
   const processGames = useCallback(async () => {
     if (!file || sorteados.length !== 6) return;
@@ -395,7 +511,7 @@ export default function MegaSena() {
           </div>
           <h1 className="text-4xl font-bold text-slate-900 mb-4">Mega Sena</h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            Faça upload do seu comprovante, insira os números sorteados e confira
+            Faça upload do seu comprovante, busque o resultado automaticamente e confira
             seus jogos em diferentes formatos de PDF.
           </p>
         </div>
@@ -445,9 +561,51 @@ export default function MegaSena() {
 
           <Card>
             <CardHeader>
-              <CardTitle>2. Números sorteados do concurso</CardTitle>
+              <CardTitle>2. Resultado do concurso</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col md:flex-row gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={buscarUltimoResultado}
+                  disabled={loadingResultado}
+                  className="md:w-auto"
+                >
+                  {loadingResultado ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="w-4 h-4 mr-2" />
+                  )}
+                  Buscar último resultado
+                </Button>
+
+                <div className="flex gap-2 w-full md:max-w-md">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Número do concurso"
+                    value={concursoBusca}
+                    onChange={(e) =>
+                      setConcursoBusca(e.target.value.replace(/\D/g, ""))
+                    }
+                    className="flex-1 h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={buscarPorConcurso}
+                    disabled={loadingResultado}
+                  >
+                    {loadingResultado ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
               <NumberInput numbers={sorteados} setNumbers={setSorteados} />
             </CardContent>
           </Card>
