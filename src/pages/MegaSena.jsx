@@ -28,88 +28,100 @@ function normalizeNumber(n) {
 }
 
 function isNoiseLine(line) {
-  const l = String(line || "").toLowerCase();
+  const l = String(line || "").toLowerCase().trim();
+  if (!l) return true;
 
   const blockedTerms = [
-    "concurso",
-    "situação",
-    "apost",
-    "pagamento",
-    "valor",
-    "total",
-    "data",
-    "hora",
-    "compra",
-    "pix",
-    "efetivada",
     "meio de pagamento",
-    "canal de vendas",
-    "terminal",
-    "r$",
-    "rs",
-    "cpf",
-    "cnpj",
-    "autenticação",
-    "banco",
-    "agência",
-    "conta",
-    "debito",
-    "crédito",
-    "favorite",
-    "salvar carrinho",
+    "número da compra",
+    "numero da compra",
+    "situação da compra",
+    "situacao da compra",
+    "hora da compra",
+    "data da compra",
+    "total da compra",
+    "total de apostas em processamento",
+    "total de apostas efetivadas",
+    "total de apostas não efetivadas",
+    "total devolvido ao meio de pagamento",
+    "em devolução ao meio de pagamento",
+    "situação da aposta",
+    "situacao da aposta",
+    "valor da aposta",
+    "compras",
+    "aguardando pagamento pix",
+    "em processamento",
+    "finalizada",
+    "salvar carrinho como favorito",
+    "megasena",
+    "mega-sena concurso",
+    "concurso situação da aposta valor da aposta",
   ];
 
   return blockedTerms.some((term) => l.includes(term));
 }
 
-function uniqueSortedGame(numbers) {
-  const normalized = numbers
-    .map(normalizeNumber)
-    .filter((n) => n !== null);
+function sanitizeLine(line) {
+  return String(line || "")
+    .replace(/[Oo]/g, "0")
+    .replace(/[Il|]/g, "1")
+    .replace(/[Ss]/g, "5")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  if (normalized.length !== 6) return null;
-  if (new Set(normalized).size !== 6) return null;
-
-  return [...normalized].sort((a, b) => a - b);
+function parseNumbersFromLine(line) {
+  return (line.match(/\b\d{1,2}\b/g) || [])
+    .map(Number)
+    .filter((n) => n >= 1 && n <= 60);
 }
 
 function extractGamesFromLines(lines) {
   const jogos = [];
   const seen = new Set();
 
-  for (const originalLine of lines) {
-    const line = String(originalLine || "").replace(/\s+/g, " ").trim();
-    if (!line) continue;
-    if (isNoiseLine(line)) continue;
+  for (const raw of lines) {
+    const line = sanitizeLine(raw);
+    if (!line || isNoiseLine(line)) continue;
 
-    const nums = (line.match(/\b\d{1,2}\b/g) || [])
-      .map(Number)
-      .filter((n) => n >= 1 && n <= 60);
+    let nums = parseNumbersFromLine(line);
 
-    if (nums.length < 6) continue;
-
-    if (nums.length === 6) {
-      const jogo = uniqueSortedGame(nums);
-      if (!jogo) continue;
-
-      const key = jogo.join("-");
-      if (!seen.has(key)) {
-        seen.add(key);
-        jogos.push({ numeros: jogo, origem: line });
+    if (nums.length >= 6) {
+      if (nums.length > 15) {
+        nums = nums.slice(0, 15);
       }
-      continue;
-    }
 
-    if (nums.length > 6 && nums.length <= 8) {
-      for (let i = 0; i <= nums.length - 6; i++) {
-        const chunk = nums.slice(i, i + 6);
-        const jogo = uniqueSortedGame(chunk);
-        if (!jogo) continue;
+      const uniqueNums = [...new Set(nums)];
+      if (uniqueNums.length >= 6 && uniqueNums.length <= 15) {
+        const sorted = [...uniqueNums].sort((a, b) => a - b);
+        const key = sorted.join("-");
 
-        const key = jogo.join("-");
         if (!seen.has(key)) {
           seen.add(key);
-          jogos.push({ numeros: jogo, origem: line });
+          jogos.push({
+            numeros: sorted,
+            origem: line,
+          });
+        }
+        continue;
+      }
+    }
+
+    const firstChunk = line.split(/2998|efetivada|r\$|rs/i)[0]?.trim() || "";
+    const chunkNums = parseNumbersFromLine(firstChunk);
+
+    if (chunkNums.length >= 6 && chunkNums.length <= 15) {
+      const uniqueNums = [...new Set(chunkNums)];
+      if (uniqueNums.length >= 6 && uniqueNums.length <= 15) {
+        const sorted = [...uniqueNums].sort((a, b) => a - b);
+        const key = sorted.join("-");
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          jogos.push({
+            numeros: sorted,
+            origem: line,
+          });
         }
       }
     }
@@ -149,7 +161,8 @@ async function extractLinesFromPdf(file) {
           .join(" ")
           .replace(/\s+/g, " ")
           .trim()
-      );
+      )
+      .filter(Boolean);
 
     allLines.push(...pageLines);
   }
@@ -164,7 +177,7 @@ async function renderPdfPagesToImages(file) {
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2 });
+    const viewport = page.getViewport({ scale: 2.5 });
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
@@ -186,7 +199,7 @@ function extractLinesFromOcrText(text) {
   return String(text || "")
     .split(/\r?\n/)
     .map((line) =>
-      line
+      String(line)
         .replace(/[Oo]/g, "0")
         .replace(/[Il|]/g, "1")
         .replace(/[Ss]/g, "5")
@@ -198,7 +211,7 @@ function extractLinesFromOcrText(text) {
 }
 
 async function extractTextWithOCR(file, setStatusText) {
-  setStatusText("PDF sem texto confiável. Tentando OCR...");
+  setStatusText("Tentando OCR para esse formato de PDF...");
 
   const images = await renderPdfPagesToImages(file);
   const worker = await createWorker("eng");
@@ -224,6 +237,23 @@ async function extractTextWithOCR(file, setStatusText) {
   return fullText.trim();
 }
 
+function shouldUseOcrFallback(pdfLines, jogosPdf) {
+  const usefulLines = pdfLines.filter((line) => !isNoiseLine(line));
+  if (!usefulLines.length) return true;
+  if (!jogosPdf.length) return true;
+
+  const linesWithManyNumbers = usefulLines.filter((line) => {
+    const nums = parseNumbersFromLine(line);
+    return nums.length >= 6;
+  });
+
+  if (linesWithManyNumbers.length && jogosPdf.length < linesWithManyNumbers.length / 2) {
+    return true;
+  }
+
+  return false;
+}
+
 export default function MegaSena() {
   const [file, setFile] = useState(null);
   const [sorteados, setSorteados] = useState([]);
@@ -241,24 +271,25 @@ export default function MegaSena() {
 
     setLoading(true);
     setResults(null);
-    setStatusText("Lendo linhas do PDF...");
+    setStatusText("Lendo texto do PDF...");
 
     try {
+      let sourceMode = "pdf";
       let jogos = [];
-      let sourceMode = "pdf-lines";
 
-      const lines = await extractLinesFromPdf(file);
+      const pdfLines = await extractLinesFromPdf(file);
 
       console.log("=== LINHAS PDF ===");
-      console.log(lines);
+      console.log(pdfLines);
 
-      jogos = extractGamesFromLines(lines);
+      const jogosPdf = extractGamesFromLines(pdfLines);
 
-      console.log("=== JOGOS EXTRAÍDOS POR LINHA ===");
-      console.log(jogos);
+      console.log("=== JOGOS PDF ===");
+      console.log(jogosPdf);
 
-      if (!jogos.length) {
+      if (shouldUseOcrFallback(pdfLines, jogosPdf)) {
         sourceMode = "ocr";
+
         const ocrText = await extractTextWithOCR(file, setStatusText);
 
         console.log("=== TEXTO OCR ===");
@@ -269,10 +300,14 @@ export default function MegaSena() {
         console.log("=== LINHAS OCR ===");
         console.log(ocrLines);
 
-        jogos = extractGamesFromLines(ocrLines);
+        const jogosOcr = extractGamesFromLines(ocrLines);
 
-        console.log("=== JOGOS EXTRAÍDOS OCR ===");
-        console.log(jogos);
+        console.log("=== JOGOS OCR ===");
+        console.log(jogosOcr);
+
+        jogos = jogosOcr.length ? jogosOcr : jogosPdf;
+      } else {
+        jogos = jogosPdf;
       }
 
       if (!jogos.length) {
@@ -286,6 +321,7 @@ export default function MegaSena() {
       const analyzed = jogos.map((jogo, idx) => {
         const nums = jogo.numeros || [];
         const acertos = nums.filter((n) => sorteadosSet.has(n)).length;
+
         return {
           numeros: nums,
           acertos,
@@ -297,7 +333,7 @@ export default function MegaSena() {
       analyzed.sort((a, b) => b.acertos - a.acertos || a.index - b.index);
 
       const summary = {};
-      for (let i = 0; i <= 6; i++) {
+      for (let i = 0; i <= 15; i++) {
         summary[i] = analyzed.filter((j) => j.acertos === i).length;
       }
 
@@ -360,7 +396,7 @@ export default function MegaSena() {
           <h1 className="text-4xl font-bold text-slate-900 mb-4">Mega Sena</h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
             Faça upload do seu comprovante, insira os números sorteados e confira
-            seus jogos com leitura mais precisa por linha.
+            seus jogos em diferentes formatos de PDF.
           </p>
         </div>
 
@@ -446,7 +482,7 @@ export default function MegaSena() {
                     <CardTitle>Resumo da conferência</CardTitle>
                     <p className="text-sm text-slate-500 mt-1">
                       Origem da leitura:{" "}
-                      {results.origem === "ocr" ? "OCR" : "Texto do PDF por linha"}
+                      {results.origem === "ocr" ? "OCR" : "Texto do PDF"}
                     </p>
                   </div>
 
