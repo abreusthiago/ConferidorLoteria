@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import Tesseract from 'tesseract.js';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -83,17 +84,29 @@ function normalizeOCRText(text = '') {
 
 function cleanupName(raw = '') {
   return normalizeSpaces(raw)
-    .replace(/^(nome|pagador|remetente|quem pagou|cliente|participante)[:\s-]*/i, '')
+    .replace(/^(nome|pagador|remetente|quem pagou|origem|cliente|participante)[:\s-]*/i, '')
     .replace(/^de(?=[:\s-]+)/i, '')
-    .replace(/^(favorecido|recebedor|para)[:\s-]*/i, '')
+    .replace(/^(favorecido|recebedor|para|destino|quem recebeu)[:\s-]*/i, '')
+    .replace(/\*{2,}.*$/i, '')
     .replace(/cpf.*$/i, '')
     .replace(/cnpj.*$/i, '')
     .replace(/institui[cç][ãa]o.*$/i, '')
+    .replace(/bco .*$/i, '')
     .replace(/banco.*$/i, '')
     .replace(/ag[êe]ncia.*$/i, '')
     .replace(/conta.*$/i, '')
-    .replace(/chave pix.*$/i, '')
-    .replace(/final [0-9x*]+.*$/i, '')
+    .replace(/tipo de conta.*$/i, '')
+    .replace(/chave\s*pix.*$/i, '')
+    .replace(/id\s*:.*$/i, '')
+    .replace(/id\s+da\s+transa[cç][ãa]o.*$/i, '')
+    .replace(/autentica[cç][ãa]o.*$/i, '')
+    .replace(/comprovante emitido.*$/i, '')
+    .replace(/informa[cç][õo]es adicionais.*$/i, '')
+    .replace(/comprovante.*$/i, '')
+    .replace(/pix\s+enviado.*$/i, '')
+    .replace(/mais clareza.*$/i, '')
+    .replace(/esse é o novo comprovante.*$/i, '')
+    .replace(/final\s+[0-9x*]+.*$/i, '')
     .trim();
 }
 
@@ -103,19 +116,19 @@ function isLikelyPersonName(name = '') {
   if (/\d/.test(clean)) return false;
 
   const lower = clean.toLowerCase();
-
   if (GENERIC_NAME_PATTERNS.some((pattern) => pattern.test(lower))) {
     return false;
   }
 
   const words = clean.split(' ').filter(Boolean);
-  if (words.length < 2 || words.length > 8) return false;
+  if (words.length < 2 || words.length > 10) return false;
 
   const connectors = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
 
   return words.every((word) => {
     const normalized = word.toLowerCase();
     if (connectors.has(normalized)) return true;
+    if (/^[A-Za-zÀ-ÿ]$/.test(word)) return true;
     return /^[A-Za-zÀ-ÿ]{2,}$/.test(word);
   });
 }
@@ -132,57 +145,97 @@ function titleCaseName(value = '') {
 function extractPreferredPayerName(text = '') {
   const cleanedText = normalizeOCRText(text);
 
+  const tryCandidate = (raw, confidence = 'high') => {
+    const candidate = titleCaseName(cleanupName(raw || ''));
+    if (isLikelyPersonName(candidate)) {
+      return { name: candidate, confidence };
+    }
+    return null;
+  };
+
+  // 1) Fallback dedicado PicPay: Para [recebedor] ... De [pagador]***
+  if (/picpay/i.test(cleanedText)) {
+    const picpayMatch = cleanedText.match(
+      /para\s*thiago\s+souza\s+de\s+abreu.*?de\s*([A-Za-zÀ-ÿ\s]+?)\*{2,}/i
+    );
+    const parsed = tryCandidate(picpayMatch?.[1], 'high');
+    if (parsed) return parsed;
+  }
+
+  // 2) Fallback dedicado Banco do Brasil: Pix Enviado + recebedor + pagador
+  if (/comprovante\s+bb|pix\s+enviado|sisbb/i.test(cleanedText)) {
+    const bbKnownReceiverMatch = cleanedText.match(
+      /pix\s+enviado\s*thiago\s+souza\s+abreu\s*([A-Za-zÀ-ÿ\s]+?)(?:id:|comprovante emitido|cpf)/i
+    );
+    const parsedKnownReceiver = tryCandidate(bbKnownReceiverMatch?.[1], 'high');
+    if (parsedKnownReceiver) return parsedKnownReceiver;
+
+    const bbCompactMatch = cleanedText.match(
+      /thiago\s+souza\s+abreu([A-ZÀ-Ú][A-Za-zÀ-ÿ\s]+?)(?:informa[cç][õo]es adicionais|id:|cpf)/i
+    );
+    const parsedCompact = tryCandidate(bbCompactMatch?.[1], 'high');
+    if (parsedCompact) return parsedCompact;
+  }
+
+  // 3) Regras genéricas melhoradas
   const payerPatterns = [
-  /dados\s+do\s+pagador[\s\S]{0,140}?de[:\s]+([^\n]+)/i,
-  /dados\s+do\s+pagador[\s\S]{0,140}?nome[:\s]+([^\n]+)/i,
-  /dados\s+de\s+quem\s+fez\s+a\s+transa[cç][ãa]o[\s\S]{0,140}?nome[:\s]+([^\n]+)/i,
-  /dados\s+de\s+quem\s+pagou[\s\S]{0,140}?nome[:\s]+([^\n]+)/i,
-  /quem\s+pagou[\s\S]{0,100}?nome[:\s]+([^\n]+)/i,
-  /pagador[\s\S]{0,100}?nome[:\s]+([^\n]+)/i,
-  /nome\s+do\s+pagador[:\s]+([^\n]+)/i,
-  /remetente[:\s]+([^\n]+)/i,
-];
+    /dados\s+do\s+pagador[\s\S]{0,180}?(?:de|nome)[:\s]+([^\n]+)/i,
+    /dados\s+de\s+quem\s+pagou[\s\S]{0,180}?nome[:\s]+([^\n]+)/i,
+    /dados\s+de\s+quem\s+fez\s+a\s+transa[cç][ãa]o[\s\S]{0,180}?nome[:\s]+([^\n]+)/i,
+    /quem\s+pagou[\s\S]{0,120}?nome[:\s]+([^\n]+)/i,
+    /origem[\s\S]{0,120}?nome[:\s]+([^\n]+)/i,
+    /pagador[:\s]+([^\n]+)/i,
+    /remetente[:\s]+([^\n]+)/i,
+    /(?:^|\n)de[:\s]+([^\n]+)/i,
+  ];
 
   for (const pattern of payerPatterns) {
     const match = cleanedText.match(pattern);
-    if (match?.[1]) {
-      const candidate = titleCaseName(cleanupName(match[1]));
-      if (isLikelyPersonName(candidate)) {
-        return { name: candidate, confidence: 'high' };
-      }
-    }
+    const parsed = tryCandidate(match?.[1], 'medium');
+    if (parsed) return parsed;
   }
 
   const lines = cleanedText
+    .replace(/RecebedorPagador/gi, 'Recebedor\nPagador\n')
+    .replace(/Pix Enviado/gi, 'Pix Enviado\n')
+    .replace(/Para([A-ZÀ-Ú])/g, 'Para\n$1')
+    .replace(/De([A-ZÀ-Ú])/g, 'De\n$1')
+    .replace(/CPF([A-ZÀ-Ú])/g, 'CPF\n$1')
+    .replace(/ID:/g, '\nID:')
     .split('\n')
     .map((line) => normalizeSpaces(line))
     .filter(Boolean);
 
-  const payerLabelRegex = /^(pagador|remetente|quem pagou|de|cliente|nome do pagador)[:\s-]*$/i;
-  const payerContextRegex = /(dados\s+do\s+pagador|dados\s+de\s+quem\s+pagou|pagador|remetente|quem pagou)/i;
-  const recipientContextRegex = /(para|favorecido|recebedor|quem recebeu|destinat[aá]rio|dados do recebedor|dados de quem recebeu)/i;
+  const payerLabelRegex =
+    /^(pagador|remetente|quem pagou|de|origem|cliente|nome do pagador)[:\s-]*$/i;
+
+  const payerContextRegex =
+    /(dados\s+do\s+pagador|dados\s+de\s+quem\s+pagou|dados\s+de\s+quem\s+fez\s+a\s+transa[cç][ãa]o|pagador|remetente|quem pagou|origem|\bde\b)/i;
+
+  const recipientContextRegex =
+    /(para|favorecido|recebedor|quem recebeu|destino|destinat[aá]rio|dados\s+do\s+recebedor|dados\s+de\s+quem\s+recebeu)/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const prev = lines[i - 1] || '';
     const next = lines[i + 1] || '';
+    const next2 = lines[i + 2] || '';
 
     if (recipientContextRegex.test(line) || recipientContextRegex.test(prev)) continue;
 
     if (payerLabelRegex.test(line) || payerContextRegex.test(line) || payerContextRegex.test(prev)) {
-      const candidate = titleCaseName(cleanupName(next));
-      if (isLikelyPersonName(candidate) && !recipientContextRegex.test(candidate)) {
-        return { name: candidate, confidence: 'medium' };
-      }
+      const parsedNext = tryCandidate(next, 'medium');
+      if (parsedNext) return parsedNext;
+
+      const parsedNext2 = tryCandidate(next2, 'medium');
+      if (parsedNext2) return parsedNext2;
     }
 
-    const inlineMatch = line.match(/(?:pagador|remetente|quem pagou|cliente|nome do pagador)[:\s-]+(.+)/i);
-    if (inlineMatch?.[1] && !recipientContextRegex.test(line)) {
-      const candidate = titleCaseName(cleanupName(inlineMatch[1]));
-      if (isLikelyPersonName(candidate)) {
-        return { name: candidate, confidence: 'medium' };
-      }
-    }
+    const inlineMatch = line.match(
+      /(?:pagador|remetente|quem pagou|origem|cliente|nome do pagador|de)[:\s-]+(.+)/i
+    );
+    const parsedInline = tryCandidate(inlineMatch?.[1], 'medium');
+    if (parsedInline) return parsedInline;
   }
 
   return null;
@@ -228,11 +281,26 @@ async function readPdfText(file) {
   return pagesText.join('\n');
 }
 
+async function readImageText(file) {
+  const {
+    data: { text },
+  } = await Tesseract.recognize(file, 'por+eng', {
+    logger: () => {},
+  });
+
+  return text || '';
+}
+
 async function extractFileText(file) {
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
     return readPdfText(file);
   }
-  return file.text();
+
+  if (file.type.startsWith('image/')) {
+    return readImageText(file);
+  }
+
+  return '';
 }
 
 function buildConsolidatedRows(items = [], valorCota = 0, admName = '', valorAdmPremio = 0) {
@@ -308,6 +376,11 @@ export default function GestaoCotas() {
   const [draftCpf, setDraftCpf] = useState('');
   const [expandedRawId, setExpandedRawId] = useState(null);
   const [error, setError] = useState('');
+  const [showOnlyPending, setShowOnlyPending] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualCpf, setManualCpf] = useState('');
+  const [manualValorPago, setManualValorPago] = useState('');
 
   const [tituloBolao, setTituloBolao] = useState('');
   const [numeroConcurso, setNumeroConcurso] = useState('');
@@ -315,6 +388,21 @@ export default function GestaoCotas() {
   const [premioTotal, setPremioTotal] = useState('');
   const [percAdm, setPercAdm] = useState('10');
   const [admSelecionado, setAdmSelecionado] = useState('');
+
+  const ADMIN_PASSWORD = '09071951';
+  const [accessPassword, setAccessPassword] = useState('');
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  const handleAccess = () => {
+    if (accessPassword === ADMIN_PASSWORD) {
+      setAuthenticated(true);
+      setAuthError('');
+      return;
+    }
+
+    setAuthError('Senha incorreta.');
+  };
 
   const addFiles = (incoming) => {
     const next = Array.from(incoming || []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'));
@@ -372,7 +460,6 @@ export default function GestaoCotas() {
 
   const saveEdit = () => {
   const manualName = titleCaseName(draftName.trim());
-  const isManualValid = isLikelyPersonName(manualName);
 
   setProcessedFiles((prev) =>
     prev.map((item) =>
@@ -381,8 +468,8 @@ export default function GestaoCotas() {
             ...item,
             nome: manualName || item.nome,
             cpf: draftCpf.trim(),
-            nomeConfiavel: isManualValid,
-            confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
+            nomeConfiavel: Boolean(manualName),
+            confiancaNome: manualName ? 'manual' : item.confiancaNome,
           }
         : item
     )
@@ -393,12 +480,51 @@ export default function GestaoCotas() {
   setDraftCpf('');
 };
 
+const addManualParticipant = () => {
+  const nome = titleCaseName(manualName.trim());
+  const valorPago = parseNumber(manualValorPago);
+
+  if (!nome) {
+    setError('Informe o nome do participante manual.');
+    return;
+  }
+
+  if (valorPago <= 0) {
+    setError('Informe um valor pago válido para o lançamento manual.');
+    return;
+  }
+
+  setError('');
+
+  setProcessedFiles((prev) => [
+    {
+      id: crypto.randomUUID(),
+      fileName: 'Lançamento manual',
+      nome,
+      nomeConfiavel: true,
+      confiancaNome: 'manual',
+      valorPago,
+      cotas: valorCotaNumero > 0 ? valorPago / valorCotaNumero : 0,
+      rawText: 'Lançamento manual sem comprovante anexado.',
+      cpf: manualCpf.trim(),
+    },
+    ...prev,
+  ]);
+
+  setManualOpen(false);
+  setManualName('');
+  setManualCpf('');
+  setManualValorPago('');
+};
+
   const valorCotaNumero = parseNumber(valorCota);
   const premioNumero = parseNumber(premioTotal);
   const percAdmNumero = parseNumber(percAdm);
   const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
   const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
   const valorPorCotaDistribuicao = valorCotaNumero > 0 ? valorDistribuido / Math.max(processedFiles.reduce((sum, item) => sum + item.cotas, 0), 1) : 0;
+
+
 
   const participantOptions = useMemo(() => {
     const unique = new Map();
@@ -473,6 +599,58 @@ const consolidatedRows = useMemo(() => {
   const totalPago = consolidatedRows.reduce((sum, row) => sum + row.valorPago, 0);
   const cotasVendidas = consolidatedRows.reduce((sum, row) => sum + row.cotasOriginais, 0);
   const totalArrecadado = cotasVendidas * valorCotaNumero;
+
+  const reviewCount = useMemo(
+  () => processedFiles.filter((item) => !item.nomeConfiavel).length,
+  [processedFiles]
+);
+
+const successCount = useMemo(
+  () => processedFiles.filter((item) => item.nomeConfiavel).length,
+  [processedFiles]
+);
+
+const sortedProcessedFiles = useMemo(() => {
+  return [...processedFiles].sort((a, b) => {
+    if (a.nomeConfiavel === b.nomeConfiavel) {
+      return a.fileName.localeCompare(b.fileName);
+    }
+    return a.nomeConfiavel ? 1 : -1;
+  });
+}, [processedFiles]);
+
+const visibleProcessedFiles = useMemo(() => {
+  if (!showOnlyPending) return sortedProcessedFiles;
+  return sortedProcessedFiles.filter((item) => !item.nomeConfiavel);
+}, [sortedProcessedFiles, showOnlyPending]);
+
+function getStatusMeta(item) {
+  if (!item.nomeConfiavel) {
+    return {
+      label: 'Revisar',
+      className: 'bg-amber-100 text-amber-800 border border-amber-200',
+    };
+  }
+
+  if (item.confiancaNome === 'manual') {
+    return {
+      label: 'Manual',
+      className: 'bg-indigo-100 text-indigo-800 border border-indigo-200',
+    };
+  }
+
+  if (item.fileName?.toLowerCase().match(/\.(jpg|jpeg|png)$/)) {
+    return {
+      label: 'OCR',
+      className: 'bg-sky-100 text-sky-800 border border-sky-200',
+    };
+  }
+
+  return {
+    label: 'Identificado',
+    className: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  };
+}
 
   const exportCSV = () => {
     const header = ['Título do Bolão', 'Concurso', 'Nome', 'Cotas', 'Valor Pago', 'Recebe Base', 'ADM', 'Recebe Final'];
@@ -571,6 +749,62 @@ const exportPDF = () => {
   doc.save('gestao-cotas.pdf');
 };
 
+if (!authenticated) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
+      <div className="mx-auto max-w-md px-4 py-10 sm:py-16">
+        <Link
+          to={createPageUrl('Home')}
+          className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Voltar ao menu
+        </Link>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Acesso restrito</h1>
+              <p className="text-sm text-slate-500">
+                Informe a senha para acessar a Gestão de Cotas.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              type="password"
+              value={accessPassword}
+              onChange={(e) => setAccessPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAccess();
+              }}
+              placeholder="Digite a senha"
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+            />
+
+            <button
+              type="button"
+              onClick={handleAccess}
+              className="h-11 w-full rounded-xl bg-slate-900 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+            >
+              Entrar
+            </button>
+
+            {authError && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {authError}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
       <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12">
@@ -762,7 +996,34 @@ const exportPDF = () => {
             </div>
           )}
         </div>
+{processedFiles.length > 0 && (
+  <div className="mb-4 space-y-3">
+    <div className="grid gap-3 md:grid-cols-3">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <div className="text-sm text-emerald-700">Identificados</div>
+        <div className="text-2xl font-semibold text-emerald-900">{successCount}</div>
+      </div>
 
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className="text-sm text-amber-700">Precisam de revisão</div>
+        <div className="text-2xl font-semibold text-amber-900">{reviewCount}</div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="text-sm text-slate-600">Total processado</div>
+        <div className="text-2xl font-semibold text-slate-900">{processedFiles.length}</div>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setShowOnlyPending((prev) => !prev)}
+      className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+    >
+      {showOnlyPending ? 'Mostrar todos' : `Mostrar só pendências (${reviewCount})`}
+    </button>
+  </div>
+)}
         {(processedFiles.length > 0 || consolidatedRows.length > 0) && (
           <div className="grid lg:grid-cols-[1fr_1fr] gap-6">
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -770,9 +1031,64 @@ const exportPDF = () => {
                 <h2 className="text-lg font-semibold text-slate-800">Processamento</h2>
                 <span className="text-sm text-slate-500">{processedFiles.length}/{files.length} concluídos</span>
               </div>
+<div className="rounded-2xl border border-slate-200 bg-white p-4">
+  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div>
+      <div className="text-sm font-semibold text-slate-900">Adicionar participante sem comprovante</div>
+      <div className="text-sm text-slate-500">
+        Use quando a pessoa pagou, mas não conseguiu enviar o comprovante.
+      </div>
+    </div>
 
+    <button
+      type="button"
+      onClick={() => setManualOpen((prev) => !prev)}
+      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+    >
+      <Edit3 className="h-4 w-4" />
+      {manualOpen ? 'Fechar' : 'Adicionar manualmente'}
+    </button>
+  </div>
+
+  {manualOpen && (
+    <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <input
+        type="text"
+        value={manualName}
+        onChange={(e) => setManualName(e.target.value)}
+        placeholder="Nome do participante"
+        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+      />
+
+      <input
+        type="text"
+        value={manualValorPago}
+        onChange={(e) => setManualValorPago(e.target.value)}
+        placeholder="Valor pago ex: 12,00"
+        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+      />
+
+      <input
+        type="text"
+        value={manualCpf}
+        onChange={(e) => setManualCpf(e.target.value)}
+        placeholder="CPF (opcional)"
+        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+      />
+
+      <button
+        type="button"
+        onClick={addManualParticipant}
+        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+      >
+        <CheckCircle2 className="h-4 w-4" />
+        Salvar manualmente
+      </button>
+    </div>
+  )}
+</div>
               <div className="space-y-3">
-                {processedFiles.map((item) => (
+                {visibleProcessedFiles.map((item) => (
                   <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -840,6 +1156,7 @@ const exportPDF = () => {
                         </button>
                       </div>
                     </div>
+                    
                       {expandedRawId === item.id && (
                         <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Texto extraído do PDF</p>
