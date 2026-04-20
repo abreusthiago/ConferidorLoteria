@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
-import NumberBall from "./NumberBall";
+import NumberBallQuina from "./NumberBallQuina";
 
 export default function NumberInput({ numbers, setNumbers }) {
   const [value, setValue] = useState("");
@@ -35,7 +35,7 @@ export default function NumberInput({ numbers, setNumbers }) {
             onClick={() => removeNumber(num)}
             className="group relative"
           >
-            <NumberBall number={num} isMatch={true} size="lg" />
+            <NumberBallQuina number={num} isMatch={true} size="lg" />
             <div className="absolute inset-0 rounded-full bg-red-500/0 group-hover:bg-red-500/80 flex items-center justify-center transition-all">
               <X className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>

@@ -510,7 +510,7 @@ export default function MegaSena() {
         </Link>
 
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-700 rounded-full text-sm font-medium mb-4">
             Conferência Inteligente
           </div>
           <h1 className="text-4xl font-bold text-slate-900 mb-4">Quina</h1>
@@ -527,7 +527,7 @@ export default function MegaSena() {
             </CardHeader>
             <CardContent>
               {!file ? (
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-2xl p-10 cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/30 transition">
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-2xl p-10 cursor-pointer hover:border-purple-400 hover:bg-purple-50/30 transition">
                   <FileUp className="w-10 h-10 text-slate-400 mb-3" />
                   <span className="text-slate-700 font-medium">
                     Clique para selecionar o PDF
@@ -593,7 +593,7 @@ export default function MegaSena() {
                     onChange={(e) =>
                       setConcursoBusca(e.target.value.replace(/\D/g, ""))
                     }
-                    className="flex-1 h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500"
+                    className="flex-1 h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-purple-500"
                   />
                   <Button
                     type="button"
@@ -617,7 +617,7 @@ export default function MegaSena() {
           <Button
             onClick={processGames}
             disabled={!canProcess}
-            className="w-full h-14 text-lg bg-emerald-600 hover:bg-emerald-700"
+            className="w-full h-14 text-lg bg-purple-600 hover:bg-purple-700"
           >
             {loading ? (
               <>

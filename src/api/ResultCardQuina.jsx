@@ -34,7 +34,7 @@ export default function ResultCard({ jogo, numerosIndex, acertos, sorteados }) {
               className={cn(
                 "h-4 w-4",
                 acertos === 5
-                  ? "text-emerald-600"
+                  ? "text-purple-600"
                   : acertos === 4
                   ? "text-blue-600"
                   : acertos === 3
