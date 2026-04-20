@@ -49,12 +49,14 @@
  */
 import Home from './pages/Home';
 import MegaSena from './pages/MegaSena';
+import Quina from "@/pages/Quina";
 import Cotas from './pages/Cotas';
 import GestaoCotas from './pages/GestaoCotas';
 
 export const PAGES = {
     "Home": Home,
     "MegaSena": MegaSena,
+    "Quina": Quina,
     "Cotas": Cotas,
     "GestaoCotas": GestaoCotas,
 }

@@ -6,7 +6,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 flex flex-col items-center justify-center px-4">
       <div className="text-center mb-10">
-        <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight">Mega Sena</h1>
+        <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight">Gestão Mega Sena</h1>
         <p className="text-slate-500 mt-2 text-sm sm:text-base">Selecione uma opção para continuar</p>
       </div>
 
@@ -22,6 +22,18 @@ export default function Home() {
             <h2 className="text-lg font-semibold text-slate-800">Conferência Inteligente</h2>
             <p className="text-sm text-slate-500 mt-1">
               Faça upload do comprovante e confira seus jogos automaticamente com os números sorteados.
+            </p>
+          </div>
+        </Link>
+
+        <Link 
+          to={createPageUrl("Quina")}
+          className="group flex flex-col items-center gap-4 bg-white border-2 border-slate-200 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-100 rounded-2xl p-8 transition-all duration-200"
+      >
+          <div className="rounded-3xl border border-slate-200 p-8 hover:shadow-md transition">
+            <h3 className="text-2xl font-semibold text-slate-900">Conferidor Quina</h3>
+            <p className="mt-3 text-slate-500">
+              Faça upload do comprovante da Quina e confira seus jogos automaticamente.
             </p>
           </div>
         </Link>

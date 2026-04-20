@@ -14,9 +14,9 @@ import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs?url";
 import { createWorker } from "tesseract.js";
 
-import NumberInput from "@/api/NumberInput";
-import ResultCard from "@/api/ResultCard";
-import SummaryCard from "@/api/SummaryCard";
+import NumberInputQuina from "@/api/NumberInputQuina";
+import ResultCardQuina from "@/api/ResultCardQuina";
+import SummaryCardQuina from "@/api/SummaryCardQuina";
 import { createPageUrl } from "@/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,20 +25,18 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const RESULT_SOURCES = [
   {
-    latest: "https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena",
-    byContest: (concurso) =>
-      `https://servicebus2.caixa.gov.br/portaldeloterias/api/megasena/${concurso}`,
+    latest: "https://servicebus2.caixa.gov.br/portaldeloterias/api/quina",
+    byContest: (concurso) => `https://servicebus2.caixa.gov.br/portaldeloterias/api/quina/${concurso}`,
   },
   {
-    latest: "https://api.guidi.dev.br/loteria/megasena/ultimo",
-    byContest: (concurso) =>
-      `https://api.guidi.dev.br/loteria/megasena/${concurso}`,
+    latest: "https://api.guidi.dev.br/loteria/quina/ultimo",
+    byContest: (concurso) => `https://api.guidi.dev.br/loteria/quina/${concurso}`,
   },
 ];
 
 function normalizeNumber(n) {
   const num = Number(n);
-  if (!Number.isInteger(num) || num < 1 || num > 60) return null;
+  if (!Number.isInteger(num) || num < 1 || num > 80) return null;
   return num;
 }
 
@@ -68,7 +66,7 @@ function isNoiseLine(line) {
     "em processamento",
     "finalizada",
     "salvar carrinho como favorito",
-    "mega-sena concurso",
+    "quina concurso",
     "concurso situação da aposta valor da aposta",
   ];
 
@@ -87,8 +85,7 @@ function sanitizeLine(line) {
 function parseNumbersFromLine(line) {
   return (line.match(/\b\d{1,2}\b/g) || [])
     .map(Number)
-    .filter((n) => n >= 1 && n <= 60);
-}
+    .filter((n) => n >= 1 && n <= 80);}
 
 function extractGamesFromLines(lines) {
   const jogos = [];
@@ -100,13 +97,13 @@ function extractGamesFromLines(lines) {
 
     let nums = parseNumbersFromLine(line);
 
-    if (nums.length >= 6) {
+    if (nums.length >= 5) {
       if (nums.length > 15) {
         nums = nums.slice(0, 15);
       }
 
       const uniqueNums = [...new Set(nums)];
-      if (uniqueNums.length >= 6 && uniqueNums.length <= 15) {
+      if (uniqueNums.length >= 5 && uniqueNums.length <= 15) {
         const sorted = [...uniqueNums].sort((a, b) => a - b);
         const key = sorted.join("-");
 
@@ -124,9 +121,9 @@ function extractGamesFromLines(lines) {
     const firstChunk = line.split(/2998|efetivada|r\$|rs/i)[0]?.trim() || "";
     const chunkNums = parseNumbersFromLine(firstChunk);
 
-    if (chunkNums.length >= 6 && chunkNums.length <= 15) {
+    if (chunkNums.length >= 5 && chunkNums.length <= 15) {
       const uniqueNums = [...new Set(chunkNums)];
-      if (uniqueNums.length >= 6 && uniqueNums.length <= 15) {
+      if (uniqueNums.length >= 5 && uniqueNums.length <= 15) {
         const sorted = [...uniqueNums].sort((a, b) => a - b);
         const key = sorted.join("-");
 
@@ -258,7 +255,7 @@ function shouldUseOcrFallback(pdfLines, jogosPdf) {
 
   const linesWithManyNumbers = usefulLines.filter((line) => {
     const nums = parseNumbersFromLine(line);
-    return nums.length >= 6;
+    return nums.length >= 5;
   });
 
   if (
@@ -285,18 +282,18 @@ function extractNumbersFromApiPayload(data) {
         .map((n) => normalizeNumber(n))
         .filter((n) => n !== null);
 
-      if (nums.length >= 6) {
-        return nums.slice(0, 6).sort((a, b) => a - b);
+      if (nums.length >= 5) {
+        return nums.slice(0, 5).sort((a, b) => a - b);
       }
     }
 
     if (typeof candidate === "string") {
       const nums = (candidate.match(/\b\d{1,2}\b/g) || [])
         .map(Number)
-        .filter((n) => n >= 1 && n <= 60);
+        .filter((n) => n >= 1 && n <= 80);
 
-      if (nums.length >= 6) {
-        return nums.slice(0, 6).sort((a, b) => a - b);
+      if (nums.length >= 5) {
+        return nums.slice(0, 5).sort((a, b) => a - b);
       }
     }
   }
@@ -314,7 +311,7 @@ export default function MegaSena() {
   const [concursoBusca, setConcursoBusca] = useState("");
 
   const canProcess = useMemo(
-    () => file && sorteados.length === 6 && !loading,
+    () => file && sorteados.length === 5 && !loading,
     [file, sorteados, loading]
   );
 
@@ -346,7 +343,7 @@ export default function MegaSena() {
 
           const dezenas = extractNumbersFromApiPayload(data);
 
-          if (dezenas.length < 6) {
+          if (dezenas.length < 5) {
             throw new Error("JSON sem dezenas válidas");
           }
 
@@ -383,7 +380,7 @@ export default function MegaSena() {
   };
 
   const processGames = useCallback(async () => {
-    if (!file || sorteados.length !== 6) return;
+    if (!file || sorteados.length !== 5) return;
 
     setLoading(true);
     setResults(null);
@@ -439,9 +436,10 @@ export default function MegaSena() {
       const acertos = nums.filter((n) => sorteadosSet.has(n)).length;
 
       let faixa = "Sem premiação";
-      if (acertos === 6) faixa = "Sena";
-      else if (acertos === 5) faixa = "Quina";
+      if  (acertos === 5) faixa = "Quina";
       else if (acertos === 4) faixa = "Quadra";
+      else if (acertos === 3) faixa = "Terno";
+      else if (acertos === 2) faixa = "Duque";
 
       return {
         numeros: nums,
@@ -495,7 +493,7 @@ export default function MegaSena() {
     });
 
     const link = document.createElement("a");
-    link.download = "resultado-mega-sena.jpg";
+    link.download = "resultado-quina.jpg";
     link.href = canvas.toDataURL("image/jpeg", 0.95);
     link.click();
   };
@@ -515,7 +513,7 @@ export default function MegaSena() {
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium mb-4">
             Conferência Inteligente
           </div>
-          <h1 className="text-4xl font-bold text-slate-900 mb-4">Mega Sena</h1>
+          <h1 className="text-4xl font-bold text-slate-900 mb-4">Quina</h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
             Faça upload do seu comprovante, busque o resultado automaticamente e confira
             seus jogos em diferentes formatos de PDF.
@@ -612,7 +610,7 @@ export default function MegaSena() {
                 </div>
               </div>
 
-              <NumberInput numbers={sorteados} setNumbers={setSorteados} />
+              <NumberInputQuina numbers={sorteados} setNumbers={setSorteados} />
             </CardContent>
           </Card>
 
@@ -658,8 +656,8 @@ export default function MegaSena() {
 
                 <CardContent>
                   <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-                    {[6, 5, 4, 3, 2, 1, 0].map((acertos) => (
-                      <SummaryCard
+                    {[5, 4, 3, 2, 1, 0].map((acertos) => (
+                      <SummaryCardQuina
                         key={acertos}
                         acertos={acertos}
                         quantidade={results.summary[acertos] || 0}
@@ -672,7 +670,7 @@ export default function MegaSena() {
 
               <div className="grid gap-4">
                 {results.jogos.map((jogo) => (
-                  <ResultCard
+                  <ResultCardQuina
                     key={jogo.index}
                     jogo={jogo}
                     numerosIndex={jogo.index}
