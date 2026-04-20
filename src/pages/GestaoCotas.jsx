@@ -415,6 +415,7 @@ export default function GestaoCotas() {
 
   const [tituloBolao, setTituloBolao] = useState('');
   const [numeroConcurso, setNumeroConcurso] = useState('');
+  const [numeroCompra, setNumeroCompra] = useState('');
   const [valorCota, setValorCota] = useState('25');
   const [premioTotal, setPremioTotal] = useState('');
   const [percAdm, setPercAdm] = useState('10');
@@ -577,89 +578,111 @@ const addManualParticipant = () => {
   setManualValorPago('');
 };
 
-  const valorCotaNumero = parseNumber(valorCota);
-  const premioNumero = parseNumber(premioTotal);
-  const percAdmNumero = parseNumber(percAdm);
-  const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
-  const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
-  const valorPorCotaDistribuicao = valorCotaNumero > 0 ? valorDistribuido / Math.max(processedFiles.reduce((sum, item) => sum + item.cotas, 0), 1) : 0;
+ const valorCotaNumero = parseNumber(valorCota);
+const premioNumero = parseNumber(premioTotal);
+const percAdmNumero = parseNumber(percAdm);
 
+const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
+const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
 
+const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
+  const cotasItem =
+    item.cotasManual !== undefined && item.cotasManual !== null
+      ? Number(item.cotasManual)
+      : Number(item.cotas || 0);
+
+  return sum + (Number.isNaN(cotasItem) ? 0 : cotasItem);
+}, 0);
+
+const valorPorCotaDistribuicao =
+  totalCotasSemBonusAdm > 0 ? valorDistribuido / totalCotasSemBonusAdm : 0;
 
   const participantOptions = useMemo(() => {
-    const unique = new Map();
-    processedFiles.forEach((item) => {
-      if (item.nome && !item.nome.startsWith('Não identificado')) {
-        unique.set(item.nome, item.nome);
-      }
-    });
-    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
-  }, [processedFiles]);
+  const unique = new Map();
+
+  processedFiles.forEach((item) => {
+    if (item.nome && !item.nome.startsWith('Não identificado')) {
+      unique.set(item.nome, item.nome);
+    }
+  });
+
+  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
+}, [processedFiles]);
 
 const consolidatedRows = useMemo(() => {
   const grouped = new Map();
   const loose = [];
 
   processedFiles.forEach((item) => {
-    const cotas =
-      item.cotasManual !== undefined && item.cotasManual !== null
-        ? item.cotasManual
-        : valorCotaNumero > 0
-          ? item.valorPago / valorCotaNumero
-          : 0;
+    const cotas = item.cotasManual !== undefined && item.cotasManual !== null
+      ? Number(item.cotasManual)
+      : valorCotaNumero > 0
+        ? item.valorPago / valorCotaNumero
+        : 0;
 
     if (!item.nomeConfiavel) {
       loose.push({
-      id: item.id,
-      nome: item.nome,
-      cpf: item.cpf || '',
-      cotasOriginais: cotas,
-      cotasExibidas: cotas,
-      valorPago: item.valorPago,
-      individual: true,
-      isAdm: false,
-    });
+        id: item.id,
+        nome: item.nome,
+        cpf: item.cpf || '',
+        cotasOriginais: cotas,
+        cotasExibidas: cotas,
+        valorPago: item.valorPago,
+        individual: true,
+        isAdm: false,
+      });
       return;
     }
 
     const key = item.nome.toLowerCase();
+
     if (!grouped.has(key)) {
       grouped.set(key, {
-      id: key,
-      nome: item.nome,
-      cpf: '',
-      cotasOriginais: 0,
-      cotasExibidas: 0,
-      valorPago: 0,
-      individual: false,
-      isAdm: false,
-    });
+        id: key,
+        nome: item.nome,
+        cpf: '',
+        cotasOriginais: 0,
+        cotasExibidas: 0,
+        valorPago: 0,
+        individual: false,
+        isAdm: false,
+      });
     }
 
     const row = grouped.get(key);
     row.cotasOriginais += cotas;
     row.valorPago += item.valorPago;
+
     if (!row.cpf && item.cpf) {
-    row.cpf = item.cpf;
+      row.cpf = item.cpf;
     }
   });
 
   const rows = [...loose, ...Array.from(grouped.values())];
 
+  const totalCotasSemBonusAdm = rows.reduce(
+    (sum, row) => sum + row.cotasOriginais,
+    0
+  );
+
+  const valorPorCotaCalculado =
+    totalCotasSemBonusAdm > 0 ? valorDistribuido / totalCotasSemBonusAdm : 0;
+
   rows.forEach((row) => {
     row.isAdm = admSelecionado === row.nome;
-    row.valorReceberBase = row.cotasOriginais * valorPorCotaDistribuicao;
+    row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
     row.valorReceberFinal = row.valorReceberBase + (row.isAdm ? valorAdmPremio : 0);
 
-    const cotasBonusAdm = row.isAdm && valorPorCotaDistribuicao > 0
-      ? valorAdmPremio / valorPorCotaDistribuicao
-      : 0;
+    const cotasBonusAdm =
+      row.isAdm && valorPorCotaCalculado > 0
+        ? valorAdmPremio / valorPorCotaCalculado
+        : 0;
 
     row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
   });
 
   return rows;
-}, [processedFiles, valorCotaNumero, admSelecionado, valorAdmPremio, valorPorCotaDistribuicao]);
+}, [processedFiles, valorCotaNumero, admSelecionado, valorAdmPremio, valorDistribuido]);
 
   const totalPago = consolidatedRows.reduce((sum, row) => sum + row.valorPago, 0);
   const cotasVendidas = consolidatedRows.reduce((sum, row) => sum + row.cotasOriginais, 0);
@@ -752,13 +775,14 @@ const exportPDF = () => {
   doc.setFontSize(10);
   doc.setTextColor(90, 90, 90);
   doc.text(`Concurso Nº ${numeroConcurso || '-'}`, margemX, 26);
-  doc.text(`Valor da cota: ${formatBRL(valorCotaNumero)}`, margemX, 32);
-  doc.text(`Total de pagadores: ${consolidatedRows.length}`, margemX, 38);
-  doc.text(`Total de cotas: ${totalCotasDocumento.toFixed(2)}`, margemX, 44);
-  doc.text(`Valor total do prêmio: ${formatBRL(premioNumero)}`, margemX, 50);
+  doc.text(`Número da Compra: ${numeroCompra || '-'}`, margemX, 32);
+  doc.text(`Valor da cota: ${formatBRL(valorCotaNumero)}`, margemX, 38);
+  doc.text(`Total de pagadores: ${consolidatedRows.length}`, margemX, 44);
+  doc.text(`Total de cotas: ${totalCotasDocumento.toFixed(2)}`, margemX, 50);
+  doc.text(`Valor total do prêmio: ${formatBRL(premioNumero)}`, margemX, 56);
   doc.setTextColor(0, 0, 0);
 
-  let y = 62;
+  let y = 68;
 
   const drawHeader = () => {
     doc.setFillColor(248, 250, 252);
@@ -915,6 +939,19 @@ if (!authenticated) {
                 placeholder="Ex: 2800"
                 className="w-full h-11 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
               />
+            </div>
+
+            <div className="sm:col-span-3">
+              <label className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-slate-700">Número da Compra</span>
+              <input
+                type="text"
+                value={numeroCompra}
+                onChange={(e) => setNumeroCompra(e.target.value)}
+                placeholder="Ex.: 496872662"
+                className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
+              />
+             </label>
             </div>
 
             <div className="sm:col-span-4">
