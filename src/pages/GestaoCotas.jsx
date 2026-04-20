@@ -144,6 +144,27 @@ function titleCaseName(value = '') {
 
 function extractPreferredPayerName(text = '') {
   const cleanedText = normalizeOCRText(text);
+    if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
+    const hasDestino = /\bdestino\b/i.test(cleanedText);
+    const hasOrigem = /\borigem\b/i.test(cleanedText);
+
+    if (hasDestino && !hasOrigem) {
+      return null;
+    }
+  }
+    // Nubank: prioriza "Origem > Nome" e evita confundir com "Destino"
+  if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
+    const nubankOriginMatch = cleanedText.match(
+      /origem[\s\S]{0,180}?nome\s+([A-Za-zÀ-ÿ\s]+?)(?:\s+institui[cç][ãa]o|\s+cpf|$)/i
+    );
+
+    if (nubankOriginMatch?.[1]) {
+      const candidate = titleCaseName(cleanupName(nubankOriginMatch[1]));
+      if (isLikelyPersonName(candidate)) {
+        return { name: candidate, confidence: 'high' };
+      }
+    }
+  }
 
   const tryCandidate = (raw, confidence = 'high') => {
     const candidate = titleCaseName(cleanupName(raw || ''));
@@ -254,11 +275,20 @@ function extractReceiptData(text = '', fileName = '') {
   const normalized = normalizeOCRText(text);
   const payer = extractPreferredPayerName(normalized);
   const amount = extractAmount(normalized);
+
+  const suspiciousNubankSelfMatch =
+    /nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(normalized) &&
+    /\bdestino\b/i.test(normalized) &&
+    /thiago\s+souza\s+de?\s+abreu/i.test(normalized) &&
+    !/\borigem\b/i.test(normalized);
+
   return {
     originalText: normalized,
-    nome: payer?.name || `Não identificado (${fileName})`,
-    nomeConfiavel: Boolean(payer?.name),
-    confiancaNome: payer?.confidence || 'low',
+    nome: suspiciousNubankSelfMatch
+      ? `Não identificado (${fileName})`
+      : payer?.name || `Não identificado (${fileName})`,
+    nomeConfiavel: suspiciousNubankSelfMatch ? false : Boolean(payer?.name),
+    confiancaNome: suspiciousNubankSelfMatch ? 'low' : payer?.confidence || 'low',
     valorPago: amount,
     arquivoRef: fileName,
   };
@@ -381,6 +411,7 @@ export default function GestaoCotas() {
   const [manualName, setManualName] = useState('');
   const [manualCpf, setManualCpf] = useState('');
   const [manualValorPago, setManualValorPago] = useState('');
+  const [draftCotas, setDraftCotas] = useState('');
 
   const [tituloBolao, setTituloBolao] = useState('');
   const [numeroConcurso, setNumeroConcurso] = useState('');
@@ -438,6 +469,7 @@ export default function GestaoCotas() {
           confiancaNome: parsed.confiancaNome,
           valorPago: parsed.valorPago,
           cotas: valorCotaNumero > 0 ? parsed.valorPago / valorCotaNumero : 0,
+          cotasManual: null,
           rawText: parsed.originalText,
           cpf: '',
         });
@@ -456,28 +488,55 @@ export default function GestaoCotas() {
     setEditingId(item.id);
     setDraftName(item.nome || '');
     setDraftCpf(item.cpf || '');
+    setDraftCotas(
+      item.cotasManual !== undefined && item.cotasManual !== null
+        ? String(item.cotasManual)
+        : String(item.cotas || '')
+    );
   };
 
   const saveEdit = () => {
-  const manualName = titleCaseName(draftName.trim());
+    const manualName = titleCaseName(draftName.trim());
+    const isManualValid = isLikelyPersonName(manualName);
+    const cotasManual = parseNumber(draftCotas);
 
-  setProcessedFiles((prev) =>
-    prev.map((item) =>
-      item.id === editingId
-        ? {
-            ...item,
-            nome: manualName || item.nome,
-            cpf: draftCpf.trim(),
-            nomeConfiavel: Boolean(manualName),
-            confiancaNome: manualName ? 'manual' : item.confiancaNome,
-          }
-        : item
-    )
-  );
+    setProcessedFiles((prev) =>
+      prev.map((item) =>
+        item.id === editingId
+          ? {
+              ...item,
+              nome: manualName || item.nome,
+              cpf: draftCpf.trim(),
+              nomeConfiavel: isManualValid,
+              confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
+              cotasManual: cotasManual > 0 ? cotasManual : null,
+            }
+          : item
+      )
+    );
 
-  setEditingId(null);
-  setDraftName('');
-  setDraftCpf('');
+    setEditingId(null);
+    setDraftName('');
+    setDraftCpf('');
+    setDraftCotas('');
+  };
+
+  const deleteRecord = (id) => {
+  const confirmed = window.confirm('Tem certeza que deseja apagar este registro?');
+  if (!confirmed) return;
+
+  setProcessedFiles((prev) => prev.filter((item) => item.id !== id));
+
+  if (editingId === id) {
+    setEditingId(null);
+    setDraftName('');
+    setDraftCpf('');
+    setDraftCotas('');
+  }
+
+  if (expandedRawId === id) {
+    setExpandedRawId(null);
+  }
 };
 
 const addManualParticipant = () => {
@@ -505,6 +564,7 @@ const addManualParticipant = () => {
       confiancaNome: 'manual',
       valorPago,
       cotas: valorCotaNumero > 0 ? valorPago / valorCotaNumero : 0,
+      cotasManual: null,
       rawText: 'Lançamento manual sem comprovante anexado.',
       cpf: manualCpf.trim(),
     },
@@ -541,7 +601,12 @@ const consolidatedRows = useMemo(() => {
   const loose = [];
 
   processedFiles.forEach((item) => {
-    const cotas = valorCotaNumero > 0 ? item.valorPago / valorCotaNumero : 0;
+    const cotas =
+      item.cotasManual !== undefined && item.cotasManual !== null
+        ? item.cotasManual
+        : valorCotaNumero > 0
+          ? item.valorPago / valorCotaNumero
+          : 0;
 
     if (!item.nomeConfiavel) {
       loose.push({
@@ -1115,6 +1180,15 @@ if (!authenticated) {
     placeholder="CPF (opcional)"
     className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
   />
+  <input
+    type="number"
+    min="0"
+    step="0.01"
+    value={draftCotas}
+    onChange={(e) => setDraftCotas(e.target.value)}
+    placeholder="Quantidade de cotas"
+    className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+  />
   <button
     type="button"
     onClick={saveEdit}
@@ -1127,8 +1201,20 @@ if (!authenticated) {
                           <>
                             <p className="text-sm text-slate-700">{item.nome}</p>
                             <p className="text-xs text-slate-500 mt-1">
-                              {formatBRL(item.valorPago)} — {item.cotas.toFixed(2)} cota(s)
+                              {formatBRL(item.valorPago)} — {(
+                                item.cotasManual !== undefined && item.cotasManual !== null
+                                  ? item.cotasManual
+                                  : item.cotas
+                              ).toFixed(2)} cota(s)
                             </p>
+                            <button
+  type="button"
+  onClick={() => deleteRecord(item.id)}
+  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+>
+  <Trash2 size={16} />
+  Apagar registro
+</button>
                             {!item.nomeConfiavel && (
                               <p className="text-xs text-amber-600 mt-1">
                                 Nome não identificado com segurança. Edite manualmente para consolidar corretamente.
