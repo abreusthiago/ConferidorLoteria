@@ -47,18 +47,19 @@
  *
  * The mainPage value must match a key in the PAGES object exactly.
  */
-import Cotas from './pages/Cotas';
 import Home from './pages/Home';
 import MegaSena from './pages/MegaSena';
-
+import Cotas from './pages/Cotas';
+import GestaoCotas from './pages/GestaoCotas';
 
 export const PAGES = {
-    "Cotas": Cotas,
     "Home": Home,
     "MegaSena": MegaSena,
+    "Cotas": Cotas,
+    "GestaoCotas": GestaoCotas,
 }
 
-export const pagesConfig = {
-    mainPage: "MegaSena",
+  export const pagesConfig = {
+    mainPage: "Home",
     Pages: PAGES,
 };

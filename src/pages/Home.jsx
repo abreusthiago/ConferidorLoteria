@@ -40,12 +40,10 @@ export default function Home() {
             </p>
           </div>
         </Link>
-        <a
-          href="https://certain-conta-paga-fcil.base44.app"
-          target="_blank"
-          rel="noopener noreferrer"
+        <Link
+          to={createPageUrl("GestaoCotas")}
           className="group flex flex-col items-center gap-4 bg-white border-2 border-slate-200 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-100 rounded-2xl p-8 transition-all duration-200"
-        >
+      >
           <div className="h-14 w-14 rounded-2xl bg-violet-50 group-hover:bg-violet-100 flex items-center justify-center transition-colors">
             <FileCheck className="h-7 w-7 text-violet-600" />
           </div>
@@ -55,7 +53,7 @@ export default function Home() {
               Processe comprovantes PIX e calcule cotas automaticamente.
             </p>
           </div>
-        </a>
+        </Link>
       </div>
     </div>
   );
