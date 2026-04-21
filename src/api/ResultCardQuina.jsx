@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 import { Trophy, Star } from "lucide-react";
 
 const acertosConfig = {
-  5: { label: "QUINA!", color: "from-blue-500 to-purple-600", icon: Trophy, border: "border-emerald-400", bg: "bg-emerald-50" },
-  4: { label: "QUADRA", color: "from-blue-500 to-indigo-600", icon: Star, border: "border-blue-400", bg: "bg-blue-50" },
+  5: { label: "QUINA!", color: "from-blue-500 to-blue-600", icon: Trophy, border: "border-emerald-400", bg: "bg-emerald-50" },
+  4: { label: "QUADRA", color: "from-blue-500 to-indigo-600", icon: Star, border: "border-purple-400", bg: "bg-purple-50" },
   3: { label: "TERNO", color: "from-amber-500 to-blue-600", icon: Star, border: "border-amber-400", bg: "bg-amber-50" },
   2: { label: "DUQUE", color: "from-amber-500 to-orange-600", icon: Star, border: "border-amber-400", bg: "bg-amber-50" },
 };
@@ -34,9 +34,9 @@ export default function ResultCard({ jogo, numerosIndex, acertos, sorteados }) {
               className={cn(
                 "h-4 w-4",
                 acertos === 5
-                  ? "text-purple-600"
-                  : acertos === 4
                   ? "text-blue-600"
+                  : acertos === 4
+                  ? "text-purple-600"
                   : acertos === 3
                   ? "text-green-600"
                   : acertos === 2

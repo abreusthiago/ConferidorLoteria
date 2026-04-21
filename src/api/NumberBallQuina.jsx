@@ -13,7 +13,7 @@ export default function NumberBall({ number, isMatch = false, size = "md" }) {
         "rounded-full flex items-center justify-center font-mono font-medium transition-all duration-300",
         sizes[size],
         isMatch
-          ? "bg-purple-500 text-white shadow-lg shadow-blue-500/30 scale-110"
+          ? "bg-blue-500 text-white shadow-lg shadow-blue-500/30 scale-110"
           : "bg-slate-100 text-slate-500 border border-slate-200"
       )}
     >

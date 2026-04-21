@@ -312,6 +312,8 @@ export default function MegaSena() {
   const [statusText, setStatusText] = useState("");
   const [loadingResultado, setLoadingResultado] = useState(false);
   const [concursoBusca, setConcursoBusca] = useState("");
+  const [concursoResultado, setConcursoResultado] = useState("");
+  const [modoResultado, setModoResultado] = useState("");
 
   const canProcess = useMemo(
     () => file && sorteados.length === 6 && !loading,
@@ -319,53 +321,59 @@ export default function MegaSena() {
   );
 
   const preencherResultado = async (mode, concurso = "") => {
-    setLoadingResultado(true);
+  setLoadingResultado(true);
 
-    try {
-      let lastError = null;
+  try {
+    let lastError = null;
 
-      for (const source of RESULT_SOURCES) {
-        const url =
-          mode === "latest" ? source.latest : source.byContest(concurso);
+    for (const source of RESULT_SOURCES) {
+      const url = mode === "latest" ? source.latest : source.byContest(concurso);
 
-        try {
-          const response = await fetch(url, {
-            headers: {
-              Accept: "application/json",
-            },
-          });
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Accept: "application/json",
+          },
+        });
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-
-          const data = await response.json();
-
-          console.log("=== RESULTADO API ===");
-          console.log(url, data);
-
-          const dezenas = extractNumbersFromApiPayload(data);
-
-          if (dezenas.length < 6) {
-            throw new Error("JSON sem dezenas válidas");
-          }
-
-          setSorteados(dezenas);
-          return;
-        } catch (err) {
-          console.error("Falha na fonte:", url, err);
-          lastError = err;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
         }
-      }
 
-      throw lastError || new Error("Nenhuma fonte retornou resultado válido.");
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível buscar o resultado automaticamente.");
-    } finally {
-      setLoadingResultado(false);
+        const data = await response.json();
+        console.log("=== RESULTADO API ===");
+        console.log(url, data);
+
+        const dezenas = extractNumbersFromApiPayload(data);
+        if (dezenas.length < 6) {
+          throw new Error("JSON sem dezenas válidas");
+        }
+
+        const numeroConcurso =
+          data?.numero ??
+          data?.concurso ??
+          data?.numeroConcurso ??
+          data?.id ??
+          "";
+
+        setSorteados(dezenas);
+        setConcursoResultado(String(numeroConcurso || ""));
+        setModoResultado(mode === "latest" ? "latest" : "contest");
+        return;
+      } catch (err) {
+        console.error("Falha na fonte:", url, err);
+        lastError = err;
+      }
     }
-  };
+
+    throw lastError || new Error("Nenhuma fonte retornou resultado válido.");
+  } catch (error) {
+    console.error(error);
+    alert("Não foi possível buscar o resultado automaticamente.");
+  } finally {
+    setLoadingResultado(false);
+  }
+};
 
   const buscarUltimoResultado = async () => {
     await preencherResultado("latest");
@@ -478,11 +486,13 @@ export default function MegaSena() {
     }
   }, [file, sorteados]);
 
-  const clearFile = () => {
-    setFile(null);
-    setResults(null);
-    setStatusText("");
-  };
+ const clearFile = () => {
+  setFile(null);
+  setResults(null);
+  setStatusText("");
+  setConcursoResultado("");
+  setModoResultado("");
+};
 
   const exportAsImage = async () => {
     const html2canvas = (await import("html2canvas")).default;
@@ -613,6 +623,21 @@ export default function MegaSena() {
               </div>
 
               <NumberInput numbers={sorteados} setNumbers={setSorteados} />
+              {concursoResultado && (
+                <p className="text-sm text-slate-500 mt-2">
+                  {modoResultado === "latest" ? (
+                    <>
+                      Último resultado carregado: concurso{" "}
+                      <strong>{concursoResultado}</strong>
+                    </>
+                  ) : (
+                    <>
+                      Resultado carregado: concurso{" "}
+                      <strong>{concursoResultado}</strong>
+                    </>
+                  )}
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -639,47 +664,158 @@ export default function MegaSena() {
           )}
 
           {results && (
-            <div id="resultado-conferencia" className="space-y-6">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle>Resumo da conferência</CardTitle>
-                    <p className="text-sm text-slate-500 mt-1">
-                      Origem da leitura:{" "}
-                      {results.origem === "ocr" ? "OCR" : "Texto do PDF"}
+            <div className="space-y-4">
+              <div className="flex items-center justify-end">
+                <Button
+                  onClick={exportAsImage}
+                  variant="outline"
+                  className="rounded-xl"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Baixar JPG
+                </Button>
+              </div>
+
+              <div
+                id="resultado-conferencia"
+                className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+              >
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        Resultado conferido
+                      </h3>
+
+                      <div className="space-y-1 text-sm text-slate-500">
+                        <p>
+                          {concursoResultado ? (
+                            <>
+                              Concurso:{" "}
+                              <strong className="text-slate-700">
+                                {concursoResultado}
+                              </strong>
+                            </>
+                          ) : (
+                            <>Concurso não identificado</>
+                          )}
+                        </p>
+
+                        <p>
+                          Origem da leitura:{" "}
+                          <strong className="text-slate-700">
+                            {results.origem === "ocr" ? "OCR" : "Texto do PDF"}
+                          </strong>
+                        </p>
+
+                        <p>
+                          Total de jogos conferidos:{" "}
+                          <strong className="text-slate-700">{results.total}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {sorteados.map((numero) => (
+                        <div
+                          key={numero}
+                          className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white shadow-sm"
+                        >
+                          {String(numero).padStart(2, "0")}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4">
+                    <h4 className="text-base font-semibold text-slate-900">
+                      Resumo da conferência
+                    </h4>
+                    <p className="text-sm text-slate-500">
+                      Distribuição dos jogos por quantidade de acertos.
                     </p>
                   </div>
 
-                  <Button variant="outline" onClick={exportAsImage}>
-                    <Download className="w-4 h-4 mr-2" />
-                    Baixar JPG
-                  </Button>
-                </CardHeader>
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                    {Object.entries(results.summary)
+                      .filter(([, total]) => total > 0)
+                      .sort((a, b) => Number(b[0]) - Number(a[0]))
+                      .map(([acertos, total]) => (
+                        <div
+                          key={acertos}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-slate-600">
+                              {Number(acertos) === 0
+                                ? "Nenhum acerto"
+                                : `${acertos} ${
+                                    Number(acertos) === 1 ? "acerto" : "acertos"
+                                  }`}
+                            </span>
+                            <span className="text-lg font-bold text-slate-900">
+                              {total}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
 
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-                    {[6, 5, 4, 3, 2, 1, 0].map((acertos) => (
-                      <SummaryCard
-                        key={acertos}
-                        acertos={acertos}
-                        quantidade={results.summary[acertos] || 0}
-                        total={results.total}
-                      />
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="mb-4">
+                    <h4 className="text-base font-semibold text-slate-900">
+                      Jogos analisados
+                    </h4>
+                    <p className="text-sm text-slate-500">
+                      Exibição em duas colunas para melhor aproveitamento do espaço no JPG.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {results.jogos.map((jogo) => (
+                      <div
+                        key={jogo.index}
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                      >
+                        <div className="mb-3 flex items-center justify-between">
+                          <span className="text-sm font-semibold text-slate-700">
+                            Jogo #{jogo.index}
+                          </span>
+
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                            {jogo.acertos === 0
+                              ? "Nenhum acerto"
+                              : `${jogo.acertos} ${
+                                  jogo.acertos === 1 ? "acerto" : "acertos"
+                                }`}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {(jogo.numeros || []).map((numero) => {
+                            const isHit = sorteados.includes(numero);
+
+                            return (
+                              <div
+                                key={`${jogo.index}-${numero}`}
+                                className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${
+                                  isHit
+                                    ? "bg-emerald-500 text-white"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {String(numero).padStart(2, "0")}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
-
-              <div className="grid gap-4">
-                {results.jogos.map((jogo) => (
-                  <ResultCard
-                    key={jogo.index}
-                    jogo={jogo}
-                    numerosIndex={jogo.index}
-                    acertos={jogo.acertos}
-                    sorteados={sorteados}
-                  />
-                ))}
+                </div>
               </div>
             </div>
           )}

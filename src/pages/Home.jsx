@@ -19,7 +19,7 @@ export default function Home() {
             <Sparkles className="h-7 w-7 text-emerald-600" />
           </div>
           <div className="text-center">
-            <h2 className="text-lg font-semibold text-slate-800">Conferência Inteligente</h2>
+            <h2 className="text-lg font-semibold text-slate-800">Conferência Mega Sena</h2>
             <p className="text-sm text-slate-500 mt-1">
               Faça upload do comprovante e confira seus jogos automaticamente com os números sorteados.
             </p>
@@ -30,10 +30,13 @@ export default function Home() {
           to={createPageUrl("Quina")}
           className="group flex flex-col items-center gap-4 bg-white border-2 border-slate-200 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-100 rounded-2xl p-8 transition-all duration-200"
       >
-          <div className="rounded-3xl border border-slate-200 p-8 hover:shadow-md transition">
-            <h3 className="text-2xl font-semibold text-slate-900">Conferidor Quina</h3>
-            <p className="mt-3 text-slate-500">
-              Faça upload do comprovante da Quina e confira seus jogos automaticamente.
+          <div className="h-14 w-14 rounded-2xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center transition-colors">
+            <Sparkles className="h-7 w-7 text-blue-600" />
+          </div>
+          <div className="text-center">
+            <h2 className="text-lg font-semibold text-slate-800">Conferência Quina</h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Faça upload do comprovante e confira seus jogos automaticamente com os números sorteados.
             </p>
           </div>
         </Link>
