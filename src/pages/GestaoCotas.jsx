@@ -421,6 +421,10 @@ export default function GestaoCotas() {
   const [percAdm, setPercAdm] = useState('10');
   const [admSelecionado, setAdmSelecionado] = useState('');
 
+  const baseInputRef = useRef(null);
+  const [baseClientes, setBaseClientes] = useState([]);
+  const [baseInfo, setBaseInfo] = useState('');
+
   const ADMIN_PASSWORD = '09071951';
   const [accessPassword, setAccessPassword] = useState('');
   const [authenticated, setAuthenticated] = useState(false);
@@ -434,6 +438,106 @@ export default function GestaoCotas() {
     }
 
     setAuthError('Senha incorreta.');
+  };
+
+  function normalizePersonName(value = '') {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sanitizeCpf(value = '') {
+  return String(value).replace(/\D/g, '');
+}
+
+function formatCpf(value = '') {
+  const digits = sanitizeCpf(value);
+  if (digits.length !== 11) return value || '';
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+function maskCpf(value = '') {
+  const digits = sanitizeCpf(value);
+
+  if (digits.length !== 11) return value || '';
+
+  return `***.${digits.slice(3, 6)}.***-**`;
+}
+
+function findClientByName(nome = '', base = []) {
+  const alvo = normalizePersonName(nome);
+  return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
+}
+
+function parseBaseCsv(text = '') {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  return lines
+    .slice(1)
+    .map((line) => {
+      const [nome, cpf] = line.split(';');
+      if (!nome || !cpf) return null;
+
+      return {
+        nome: titleCaseName(nome.trim()),
+        cpf: formatCpf(cpf.trim()),
+      };
+    })
+    .filter((item) => item && item.nome && sanitizeCpf(item.cpf).length === 11);
+}
+
+  const importBaseClientes = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = parseBaseCsv(text);
+
+      if (!parsed.length) {
+        setError('A base de dados não possui registros válidos. Use o formato nome;cpf.');
+        return;
+      }
+
+      setBaseClientes(parsed);
+      setBaseInfo(`${parsed.length} cliente(s) carregado(s) na base.`);
+      setError('');
+    } catch (err) {
+      console.error(err);
+      setError('Não foi possível importar a base de dados.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const aplicarBaseAosProcessados = () => {
+    if (!baseClientes.length) {
+      setError('Importe a base de dados antes de aplicar.');
+      return;
+    }
+
+    setProcessedFiles((prev) =>
+      prev.map((item) => {
+        const encontrado = findClientByName(item.nome, baseClientes);
+
+        if (!encontrado) return item;
+
+        return {
+          ...item,
+          cpf: item.cpf || encontrado.cpf,
+        };
+      })
+    );
+
+    setError('');
   };
 
   const addFiles = (incoming) => {
@@ -462,6 +566,8 @@ export default function GestaoCotas() {
         const extractedText = await extractFileText(file);
         const parsed = extractReceiptData(extractedText, file.name);
 
+        const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
+
         results.push({
           id: crypto.randomUUID(),
           fileName: file.name,
@@ -470,9 +576,8 @@ export default function GestaoCotas() {
           confiancaNome: parsed.confiancaNome,
           valorPago: parsed.valorPago,
           cotas: valorCotaNumero > 0 ? parsed.valorPago / valorCotaNumero : 0,
-          cotasManual: null,
           rawText: parsed.originalText,
-          cpf: '',
+          cpf: encontradoNaBase?.cpf || '',
         });
       }
 
@@ -486,9 +591,10 @@ export default function GestaoCotas() {
   };
 
   const startEdit = (item) => {
+    const clienteEncontrado = findClientByName(item.nome, baseClientes);
     setEditingId(item.id);
     setDraftName(item.nome || '');
-    setDraftCpf(item.cpf || '');
+    setDraftCpf(item.cpf || clienteEncontrado?.cpf || '');
     setDraftCotas(
       item.cotasManual !== undefined && item.cotasManual !== null
         ? String(item.cotasManual)
@@ -501,13 +607,20 @@ export default function GestaoCotas() {
     const isManualValid = isLikelyPersonName(manualName);
     const cotasManual = parseNumber(draftCotas);
 
+    const clienteEncontrado = findClientByName(manualName, baseClientes);
+
+    const cpfFinal =
+      formatCpf(draftCpf.trim()) ||
+      clienteEncontrado?.cpf ||
+      '';
+
     setProcessedFiles((prev) =>
       prev.map((item) =>
         item.id === editingId
           ? {
               ...item,
               nome: manualName || item.nome,
-              cpf: draftCpf.trim(),
+              cpf: cpfFinal,
               nomeConfiavel: isManualValid,
               confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
               cotasManual: cotasManual > 0 ? cotasManual : null,
@@ -578,14 +691,14 @@ const addManualParticipant = () => {
   setManualValorPago('');
 };
 
- const valorCotaNumero = parseNumber(valorCota);
-const premioNumero = parseNumber(premioTotal);
-const percAdmNumero = parseNumber(percAdm);
+  const valorCotaNumero = parseNumber(valorCota);
+  const premioNumero = parseNumber(premioTotal);
+  const percAdmNumero = parseNumber(percAdm);
 
-const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
-const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
+  const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
+  const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
 
-const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
+  const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
   const cotasItem =
     item.cotasManual !== undefined && item.cotasManual !== null
       ? Number(item.cotasManual)
@@ -594,7 +707,7 @@ const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
   return sum + (Number.isNaN(cotasItem) ? 0 : cotasItem);
 }, 0);
 
-const valorPorCotaDistribuicao =
+  const valorPorCotaDistribuicao =
   totalCotasSemBonusAdm > 0 ? valorDistribuido / totalCotasSemBonusAdm : 0;
 
   const participantOptions = useMemo(() => {
@@ -609,7 +722,7 @@ const valorPorCotaDistribuicao =
   return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
 }, [processedFiles]);
 
-const consolidatedRows = useMemo(() => {
+  const consolidatedRows = useMemo(() => {
   const grouped = new Map();
   const loose = [];
 
@@ -760,7 +873,7 @@ function getStatusMeta(item) {
   0
 );
 
-const exportPDF = () => {
+const exportPDF = ({ maskedCpf = false, fileName = 'gestao-cotas.pdf' } = {}) => {
   const doc = new jsPDF();
   const titulo = tituloBolao || 'Mega Sena';
   const margemX = 14;
@@ -816,7 +929,8 @@ const exportPDF = () => {
     }
 
     doc.text(nomeLinhas, margemX + 12, y);
-    doc.text(row.cpf || '', margemX + 100, y);
+    const cpfExibido = maskedCpf ? maskCpf(row.cpf || '') : (row.cpf || '');
+    doc.text(cpfExibido, margemX + 100, y);
     doc.text(row.cotasExibidas.toFixed(2), margemX + 132, y);
     doc.text(formatBRL(row.valorReceberFinal), margemX + 156, y);
 
@@ -835,7 +949,7 @@ const exportPDF = () => {
     { maxWidth: larguraUtil }
   );
 
-  doc.save('gestao-cotas.pdf');
+  doc.save(fileName);
 };
 
 if (!authenticated) {
@@ -1062,6 +1176,14 @@ if (!authenticated) {
             onChange={(e) => addFiles(e.target.files)}
           />
 
+          <input
+            ref={baseInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={importBaseClientes}
+          />
+
           {files.length > 0 && (
             <div className="mt-5 space-y-2">
               {files.map((file) => (
@@ -1116,6 +1238,32 @@ if (!authenticated) {
         <div className="text-2xl font-semibold text-slate-900">{processedFiles.length}</div>
       </div>
     </div>
+
+    <div className="flex flex-wrap gap-3">
+  <button
+    type="button"
+    onClick={() => baseInputRef.current?.click()}
+    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+  >
+    <FileSpreadsheet className="h-4 w-4" />
+    Importar base de dados
+  </button>
+
+  <button
+    type="button"
+    onClick={aplicarBaseAosProcessados}
+    disabled={!processedFiles.length || !baseClientes.length}
+    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    <CheckCircle2 className="h-4 w-4" />
+    Aplicar base aos registros
+  </button>
+</div>
+{baseInfo && (
+  <p className="mt-2 text-sm text-slate-500">
+    {baseInfo}
+  </p>
+)}
 
     <button
       type="button"
@@ -1207,9 +1355,20 @@ if (!authenticated) {
                           <div className="flex flex-col gap-2 mt-2">
   <input
     value={draftName}
-    onChange={(e) => setDraftName(e.target.value)}
+    onChange={(e) => {
+      const novoNome = e.target.value;
+      setDraftName(novoNome);
+
+      const clienteEncontrado = findClientByName(novoNome, baseClientes);
+      const cpfAtualLimpo = sanitizeCpf(draftCpf);
+      const cpfEncontradoLimpo = sanitizeCpf(clienteEncontrado?.cpf || '');
+
+      if (!cpfAtualLimpo || cpfAtualLimpo === cpfEncontradoLimpo) {
+        setDraftCpf(clienteEncontrado?.cpf || '');
+      }
+    }}
+    className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
     placeholder="Nome do participante"
-    className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
   />
   <input
     value={draftCpf}
@@ -1344,12 +1503,29 @@ if (!authenticated) {
                     </button>
                     <button
                       type="button"
-                      onClick={exportPDF}
-                      disabled={!consolidatedRows.length}
-                      className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
+                      onClick={() =>
+                        exportPDF({
+                          maskedCpf: true,
+                          fileName: 'gestao-cotas-compartilhar.pdf',
+                        })
+                      }
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
                     >
-                      <Download className="h-4 w-4" />
-                      PDF
+                      <FileText className="h-4 w-4" />
+                      PDF para compartilhar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        exportPDF({
+                          maskedCpf: false,
+                          fileName: 'gestao-cotas-oficial.pdf',
+                        })
+                      }
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <FileText className="h-4 w-4" />
+                      PDF oficial
                     </button>
                   </div>
                 </div>
