@@ -412,6 +412,7 @@ export default function GestaoCotas() {
   const [manualCpf, setManualCpf] = useState('');
   const [manualValorPago, setManualValorPago] = useState('');
   const [draftCotas, setDraftCotas] = useState('');
+  const [draftValorPago, setDraftValorPago] = useState('');
 
   const [tituloBolao, setTituloBolao] = useState('');
   const [numeroConcurso, setNumeroConcurso] = useState('');
@@ -600,12 +601,17 @@ function parseBaseCsv(text = '') {
         ? String(item.cotasManual)
         : String(item.cotas || '')
     );
+    setDraftValorPago(
+      item.valorPago ? String(item.valorPago).replace('.', ',') : ''
+    );
   };
 
   const saveEdit = () => {
     const manualName = titleCaseName(draftName.trim());
     const isManualValid = isLikelyPersonName(manualName);
     const cotasManual = parseNumber(draftCotas);
+    const valorPagoManual = parseNumber(draftValorPago);
+
 
     const clienteEncontrado = findClientByName(manualName, baseClientes);
 
@@ -621,6 +627,7 @@ function parseBaseCsv(text = '') {
               ...item,
               nome: manualName || item.nome,
               cpf: cpfFinal,
+              valorPago: valorPagoManual > 0 ? valorPagoManual : item.valorPago,
               nomeConfiavel: isManualValid,
               confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
               cotasManual: cotasManual > 0 ? cotasManual : null,
@@ -1384,6 +1391,13 @@ if (!authenticated) {
     onChange={(e) => setDraftCotas(e.target.value)}
     placeholder="Quantidade de cotas"
     className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+  />
+  <input
+    type="text"
+    value={draftValorPago}
+    onChange={(e) => setDraftValorPago(e.target.value)}
+    placeholder="Ex.: 25,00"
+    className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
   />
   <button
     type="button"
