@@ -420,7 +420,11 @@ export default function GestaoCotas() {
   const [valorCota, setValorCota] = useState('25');
   const [premioTotal, setPremioTotal] = useState('');
   const [percAdm, setPercAdm] = useState('10');
+
+  const [tipoBolao, setTipoBolao] = useState('normal');
   const [admSelecionado, setAdmSelecionado] = useState('');
+  const [admMensal1, setAdmMensal1] = useState('');
+  const [admMensal2, setAdmMensal2] = useState('');
 
   const baseInputRef = useRef(null);
   const [baseClientes, setBaseClientes] = useState([]);
@@ -442,58 +446,56 @@ export default function GestaoCotas() {
   };
 
   function normalizePersonName(value = '') {
-  return String(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+    return String(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
-function sanitizeCpf(value = '') {
-  return String(value).replace(/\D/g, '');
-}
+  function sanitizeCpf(value = '') {
+    return String(value).replace(/\D/g, '');
+  }
 
-function formatCpf(value = '') {
-  const digits = sanitizeCpf(value);
-  if (digits.length !== 11) return value || '';
-  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-}
+  function formatCpf(value = '') {
+    const digits = sanitizeCpf(value);
+    if (digits.length !== 11) return value || '';
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  }
 
-function maskCpf(value = '') {
-  const digits = sanitizeCpf(value);
+  function maskCpf(value = '') {
+    const digits = sanitizeCpf(value);
+    if (digits.length !== 11) return value || '';
+    return `***.${digits.slice(3, 6)}.***-**`;
+  }
 
-  if (digits.length !== 11) return value || '';
+  function findClientByName(nome = '', base = []) {
+    const alvo = normalizePersonName(nome);
+    return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
+  }
 
-  return `***.${digits.slice(3, 6)}.***-**`;
-}
+  function parseBaseCsv(text = '') {
+    const lines = String(text)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
-function findClientByName(nome = '', base = []) {
-  const alvo = normalizePersonName(nome);
-  return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
-}
+    if (!lines.length) return [];
 
-function parseBaseCsv(text = '') {
-  const lines = String(text)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+    return lines
+      .slice(1)
+      .map((line) => {
+        const [nome, cpf] = line.split(';');
+        if (!nome || !cpf) return null;
 
-  if (!lines.length) return [];
-
-  return lines
-    .slice(1)
-    .map((line) => {
-      const [nome, cpf] = line.split(';');
-      if (!nome || !cpf) return null;
-
-      return {
-        nome: titleCaseName(nome.trim()),
-        cpf: formatCpf(cpf.trim()),
-      };
-    })
-    .filter((item) => item && item.nome && sanitizeCpf(item.cpf).length === 11);
-}
+        return {
+          nome: titleCaseName(nome.trim()),
+          cpf: formatCpf(cpf.trim()),
+        };
+      })
+      .filter((item) => item && item.nome && sanitizeCpf(item.cpf).length === 11);
+  }
 
   const importBaseClientes = async (event) => {
     const file = event.target.files?.[0];
@@ -528,7 +530,6 @@ function parseBaseCsv(text = '') {
     setProcessedFiles((prev) =>
       prev.map((item) => {
         const encontrado = findClientByName(item.nome, baseClientes);
-
         if (!encontrado) return item;
 
         return {
@@ -542,7 +543,9 @@ function parseBaseCsv(text = '') {
   };
 
   const addFiles = (incoming) => {
-    const next = Array.from(incoming || []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'));
+    const next = Array.from(incoming || []).filter(
+      (file) => file.type === 'application/pdf' || file.type.startsWith('image/')
+    );
     setFiles((prev) => [...prev, ...next]);
   };
 
@@ -550,6 +553,8 @@ function parseBaseCsv(text = '') {
     setFiles((prev) => prev.filter((file) => file.name !== name));
     setProcessedFiles((prev) => prev.filter((item) => item.fileName !== name));
   };
+
+  const valorCotaNumero = parseNumber(valorCota);
 
   const processFiles = async () => {
     setError('');
@@ -560,13 +565,11 @@ function parseBaseCsv(text = '') {
 
     setProcessing(true);
     try {
-      const valorCotaNumero = parseNumber(valorCota);
       const results = [];
 
       for (const file of files) {
         const extractedText = await extractFileText(file);
         const parsed = extractReceiptData(extractedText, file.name);
-
         const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
 
         results.push({
@@ -584,7 +587,9 @@ function parseBaseCsv(text = '') {
 
       setProcessedFiles(results);
     } catch (err) {
-      setError('Não foi possível processar os arquivos. Confira se pdfjs-dist está instalado e se o PDF permite extração de texto.');
+      setError(
+        'Não foi possível processar os arquivos. Confira se pdfjs-dist está instalado e se o PDF permite extração de texto.'
+      );
       console.error(err);
     } finally {
       setProcessing(false);
@@ -601,9 +606,7 @@ function parseBaseCsv(text = '') {
         ? String(item.cotasManual)
         : String(item.cotas || '')
     );
-    setDraftValorPago(
-      item.valorPago ? String(item.valorPago).replace('.', ',') : ''
-    );
+    setDraftValorPago(item.valorPago ? String(item.valorPago).replace('.', ',') : '');
   };
 
   const saveEdit = () => {
@@ -611,14 +614,9 @@ function parseBaseCsv(text = '') {
     const isManualValid = isLikelyPersonName(manualName);
     const cotasManual = parseNumber(draftCotas);
     const valorPagoManual = parseNumber(draftValorPago);
-
-
     const clienteEncontrado = findClientByName(manualName, baseClientes);
 
-    const cpfFinal =
-      formatCpf(draftCpf.trim()) ||
-      clienteEncontrado?.cpf ||
-      '';
+    const cpfFinal = formatCpf(draftCpf.trim()) || clienteEncontrado?.cpf || '';
 
     setProcessedFiles((prev) =>
       prev.map((item) =>
@@ -640,385 +638,395 @@ function parseBaseCsv(text = '') {
     setDraftName('');
     setDraftCpf('');
     setDraftCotas('');
+    setDraftValorPago('');
   };
 
   const deleteRecord = (id) => {
-  const confirmed = window.confirm('Tem certeza que deseja apagar este registro?');
-  if (!confirmed) return;
+    const confirmed = window.confirm('Tem certeza que deseja apagar este registro?');
+    if (!confirmed) return;
 
-  setProcessedFiles((prev) => prev.filter((item) => item.id !== id));
+    setProcessedFiles((prev) => prev.filter((item) => item.id !== id));
 
-  if (editingId === id) {
-    setEditingId(null);
-    setDraftName('');
-    setDraftCpf('');
-    setDraftCotas('');
-  }
+    if (editingId === id) {
+      setEditingId(null);
+      setDraftName('');
+      setDraftCpf('');
+      setDraftCotas('');
+      setDraftValorPago('');
+    }
 
-  if (expandedRawId === id) {
-    setExpandedRawId(null);
-  }
-};
+    if (expandedRawId === id) {
+      setExpandedRawId(null);
+    }
+  };
 
-const addManualParticipant = () => {
-  const nome = titleCaseName(manualName.trim());
-  const valorPago = parseNumber(manualValorPago);
+  const addManualParticipant = () => {
+    const nome = titleCaseName(manualName.trim());
+    const valorPago = parseNumber(manualValorPago);
 
-  if (!nome) {
-    setError('Informe o nome do participante manual.');
-    return;
-  }
+    if (!nome) {
+      setError('Informe o nome do participante manual.');
+      return;
+    }
 
-  if (valorPago <= 0) {
-    setError('Informe um valor pago válido para o lançamento manual.');
-    return;
-  }
+    if (valorPago <= 0) {
+      setError('Informe um valor pago válido para o lançamento manual.');
+      return;
+    }
 
-  setError('');
+    setError('');
 
-  setProcessedFiles((prev) => [
-    {
-      id: crypto.randomUUID(),
-      fileName: 'Lançamento manual',
-      nome,
-      nomeConfiavel: true,
-      confiancaNome: 'manual',
-      valorPago,
-      cotas: valorCotaNumero > 0 ? valorPago / valorCotaNumero : 0,
-      cotasManual: null,
-      rawText: 'Lançamento manual sem comprovante anexado.',
-      cpf: manualCpf.trim(),
-    },
-    ...prev,
-  ]);
+    setProcessedFiles((prev) => [
+      {
+        id: crypto.randomUUID(),
+        fileName: 'Lançamento manual',
+        nome,
+        nomeConfiavel: true,
+        confiancaNome: 'manual',
+        valorPago,
+        cotas: valorCotaNumero > 0 ? valorPago / valorCotaNumero : 0,
+        cotasManual: null,
+        rawText: 'Lançamento manual sem comprovante anexado.',
+        cpf: manualCpf.trim(),
+      },
+      ...prev,
+    ]);
 
-  setManualOpen(false);
-  setManualName('');
-  setManualCpf('');
-  setManualValorPago('');
-};
+    setManualOpen(false);
+    setManualName('');
+    setManualCpf('');
+    setManualValorPago('');
+  };
 
-  const valorCotaNumero = parseNumber(valorCota);
   const premioNumero = parseNumber(premioTotal);
   const percAdmNumero = parseNumber(percAdm);
 
   const valorAdmPremio = premioNumero > 0 ? (premioNumero * percAdmNumero) / 100 : 0;
   const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
 
-  const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
-  const cotasItem =
-    item.cotasManual !== undefined && item.cotasManual !== null
-      ? Number(item.cotasManual)
-      : Number(item.cotas || 0);
+  const adminsAtivos = useMemo(() => {
+    if (tipoBolao === 'mensal') {
+      return [admMensal1, admMensal2].filter(Boolean);
+    }
 
-  return sum + (Number.isNaN(cotasItem) ? 0 : cotasItem);
-}, 0);
+    return admSelecionado ? [admSelecionado] : [];
+  }, [tipoBolao, admSelecionado, admMensal1, admMensal2]);
+
+  const valorAdmPorPessoa =
+    adminsAtivos.length > 0 ? valorAdmPremio / adminsAtivos.length : 0;
+
+  const mensalInvalido =
+    tipoBolao === 'mensal' &&
+    (!admMensal1 || !admMensal2 || admMensal1 === admMensal2);
+
+  const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
+    const cotasItem =
+      item.cotasManual !== undefined && item.cotasManual !== null
+        ? Number(item.cotasManual)
+        : Number(item.cotas || 0);
+
+    return sum + (Number.isNaN(cotasItem) ? 0 : cotasItem);
+  }, 0);
 
   const valorPorCotaDistribuicao =
-  totalCotasSemBonusAdm > 0 ? valorDistribuido / totalCotasSemBonusAdm : 0;
-
-  const participantOptions = useMemo(() => {
-  const unique = new Map();
-
-  processedFiles.forEach((item) => {
-    if (item.nome && !item.nome.startsWith('Não identificado')) {
-      unique.set(item.nome, item.nome);
-    }
-  });
-
-  return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
-}, [processedFiles]);
-
-  const consolidatedRows = useMemo(() => {
-  const grouped = new Map();
-  const loose = [];
-
-  processedFiles.forEach((item) => {
-    const cotas = item.cotasManual !== undefined && item.cotasManual !== null
-      ? Number(item.cotasManual)
-      : valorCotaNumero > 0
-        ? item.valorPago / valorCotaNumero
-        : 0;
-
-    if (!item.nomeConfiavel) {
-      loose.push({
-        id: item.id,
-        nome: item.nome,
-        cpf: item.cpf || '',
-        cotasOriginais: cotas,
-        cotasExibidas: cotas,
-        valorPago: item.valorPago,
-        individual: true,
-        isAdm: false,
-      });
-      return;
-    }
-
-    const key = item.nome.toLowerCase();
-
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        id: key,
-        nome: item.nome,
-        cpf: '',
-        cotasOriginais: 0,
-        cotasExibidas: 0,
-        valorPago: 0,
-        individual: false,
-        isAdm: false,
-      });
-    }
-
-    const row = grouped.get(key);
-    row.cotasOriginais += cotas;
-    row.valorPago += item.valorPago;
-
-    if (!row.cpf && item.cpf) {
-      row.cpf = item.cpf;
-    }
-  });
-
-  const rows = [...loose, ...Array.from(grouped.values())];
-
-  const totalCotasSemBonusAdm = rows.reduce(
-    (sum, row) => sum + row.cotasOriginais,
-    0
-  );
-
-  const valorPorCotaCalculado =
     totalCotasSemBonusAdm > 0 ? valorDistribuido / totalCotasSemBonusAdm : 0;
 
-  rows.forEach((row) => {
-    row.isAdm = admSelecionado === row.nome;
-    row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
-    row.valorReceberFinal = row.valorReceberBase + (row.isAdm ? valorAdmPremio : 0);
+  const participantOptions = useMemo(() => {
+    const unique = new Map();
 
-    const cotasBonusAdm =
-      row.isAdm && valorPorCotaCalculado > 0
-        ? valorAdmPremio / valorPorCotaCalculado
-        : 0;
+    processedFiles.forEach((item) => {
+      if (item.nome && !item.nome.startsWith('Não identificado')) {
+        unique.set(item.nome, item.nome);
+      }
+    });
 
-    row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
-  });
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b));
+  }, [processedFiles]);
 
-  return rows;
-}, [processedFiles, valorCotaNumero, admSelecionado, valorAdmPremio, valorDistribuido]);
+  const consolidatedRows = useMemo(() => {
+    const grouped = new Map();
+    const loose = [];
+
+    processedFiles.forEach((item) => {
+      const cotas =
+        item.cotasManual !== undefined && item.cotasManual !== null
+          ? Number(item.cotasManual)
+          : valorCotaNumero > 0
+            ? item.valorPago / valorCotaNumero
+            : 0;
+
+      if (!item.nomeConfiavel) {
+        loose.push({
+          id: item.id,
+          nome: item.nome,
+          cpf: item.cpf || '',
+          cotasOriginais: cotas,
+          cotasExibidas: cotas,
+          valorPago: item.valorPago,
+          individual: true,
+          isAdm: false,
+          valorReceberBase: 0,
+          valorReceberFinal: 0,
+        });
+        return;
+      }
+
+      const key = item.nome.toLowerCase();
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: key,
+          nome: item.nome,
+          cpf: '',
+          cotasOriginais: 0,
+          cotasExibidas: 0,
+          valorPago: 0,
+          individual: false,
+          isAdm: false,
+          valorReceberBase: 0,
+          valorReceberFinal: 0,
+        });
+      }
+
+      const row = grouped.get(key);
+      row.cotasOriginais += cotas;
+      row.valorPago += item.valorPago;
+
+      if (!row.cpf && item.cpf) {
+        row.cpf = item.cpf;
+      }
+    });
+
+    const rows = [...loose, ...Array.from(grouped.values())];
+
+    const totalCotasCalculadas = rows.reduce((sum, row) => sum + row.cotasOriginais, 0);
+    const valorPorCotaCalculado =
+      totalCotasCalculadas > 0 ? valorDistribuido / totalCotasCalculadas : 0;
+
+    rows.forEach((row) => {
+      row.isAdm = adminsAtivos.includes(row.nome);
+      row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
+      row.valorReceberFinal =
+        row.valorReceberBase + (row.isAdm ? valorAdmPorPessoa : 0);
+
+      const cotasBonusAdm =
+        row.isAdm && valorPorCotaCalculado > 0
+          ? valorAdmPorPessoa / valorPorCotaCalculado
+          : 0;
+
+      row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
+    });
+
+    return rows;
+  }, [processedFiles, valorCotaNumero, adminsAtivos, valorAdmPorPessoa, valorDistribuido]);
 
   const totalPago = consolidatedRows.reduce((sum, row) => sum + row.valorPago, 0);
   const cotasVendidas = consolidatedRows.reduce((sum, row) => sum + row.cotasOriginais, 0);
   const totalArrecadado = cotasVendidas * valorCotaNumero;
 
   const reviewCount = useMemo(
-  () => processedFiles.filter((item) => !item.nomeConfiavel).length,
-  [processedFiles]
-);
-
-const successCount = useMemo(
-  () => processedFiles.filter((item) => item.nomeConfiavel).length,
-  [processedFiles]
-);
-
-const sortedProcessedFiles = useMemo(() => {
-  return [...processedFiles].sort((a, b) => {
-    if (a.nomeConfiavel === b.nomeConfiavel) {
-      return a.fileName.localeCompare(b.fileName);
-    }
-    return a.nomeConfiavel ? 1 : -1;
-  });
-}, [processedFiles]);
-
-const visibleProcessedFiles = useMemo(() => {
-  if (!showOnlyPending) return sortedProcessedFiles;
-  return sortedProcessedFiles.filter((item) => !item.nomeConfiavel);
-}, [sortedProcessedFiles, showOnlyPending]);
-
-function getStatusMeta(item) {
-  if (!item.nomeConfiavel) {
-    return {
-      label: 'Revisar',
-      className: 'bg-amber-100 text-amber-800 border border-amber-200',
-    };
-  }
-
-  if (item.confiancaNome === 'manual') {
-    return {
-      label: 'Manual',
-      className: 'bg-indigo-100 text-indigo-800 border border-indigo-200',
-    };
-  }
-
-  if (item.fileName?.toLowerCase().match(/\.(jpg|jpeg|png)$/)) {
-    return {
-      label: 'OCR',
-      className: 'bg-sky-100 text-sky-800 border border-sky-200',
-    };
-  }
-
-  return {
-    label: 'Identificado',
-    className: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
-  };
-}
-
-  const exportCSV = () => {
-    const header = ['Título do Bolão', 'Concurso', 'Nome', 'Cotas', 'Valor Pago', 'Recebe Base', 'ADM', 'Recebe Final'];
-    const lines = consolidatedRows.map((row) => [
-      `"${tituloBolao.replace(/"/g, '""')}"`,
-      `"${numeroConcurso.replace(/"/g, '""')}"`,
-      `"${row.nome.replace(/"/g, '""')}"`,
-      row.cotas.toFixed(2),
-      row.valorPago.toFixed(2),
-      row.valorReceberBase.toFixed(2),
-      row.isAdm ? valorAdmPremio.toFixed(2) : '0.00',
-      row.valorReceberFinal.toFixed(2),
-    ].join(';'));
-    downloadBlob('gestao-cotas.csv', [header.join(';'), ...lines].join('\n'), 'text/csv;charset=utf-8');
-  };
-
- const totalCotasDocumento = consolidatedRows.reduce(
-  (sum, row) => sum + row.cotasExibidas,
-  0
-);
-
-const exportPDF = ({ maskedCpf = false, fileName = 'gestao-cotas.pdf' } = {}) => {
-  const doc = new jsPDF();
-  const titulo = tituloBolao || 'Mega Sena';
-  const margemX = 14;
-  const larguraPagina = doc.internal.pageSize.getWidth();
-  const larguraUtil = larguraPagina - margemX * 2;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text(titulo, margemX, 18);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(90, 90, 90);
-  doc.text(`Concurso Nº ${numeroConcurso || '-'}`, margemX, 26);
-  doc.text(`Número da Compra: ${numeroCompra || '-'}`, margemX, 32);
-  doc.text(`Valor da cota: ${formatBRL(valorCotaNumero)}`, margemX, 38);
-  doc.text(`Total de pagadores: ${consolidatedRows.length}`, margemX, 44);
-  doc.text(`Total de cotas: ${totalCotasDocumento.toFixed(2)}`, margemX, 50);
-  doc.text(`Valor total do prêmio: ${formatBRL(premioNumero)}`, margemX, 56);
-  doc.setTextColor(0, 0, 0);
-
-  let y = 68;
-
-  const drawHeader = () => {
-    doc.setFillColor(248, 250, 252);
-    doc.rect(margemX, y - 5, larguraUtil, 8, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text('#', margemX + 2, y);
-    doc.text('Nome', margemX + 12, y);
-    doc.text('CPF', margemX + 100, y);
-    doc.text('Cotas', margemX + 132, y);
-    doc.text('Valor Estimado', margemX + 156, y);
-    y += 8;
-  };
-
-  drawHeader();
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-
-  consolidatedRows.forEach((row, index) => {
-    const nome = row.isAdm ? `${row.nome}` : row.nome;
-    const nomeLinhas = doc.splitTextToSize(nome, 95);
-    const alturaLinha = Math.max(8, nomeLinhas.length * 5);
-
-    if (y + alturaLinha > 275) {
-      doc.addPage();
-      y = 20;
-      drawHeader();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-    }
-
-    doc.text(nomeLinhas, margemX + 12, y);
-    const cpfExibido = maskedCpf ? maskCpf(row.cpf || '') : (row.cpf || '');
-    doc.text(cpfExibido, margemX + 100, y);
-    doc.text(row.cotasExibidas.toFixed(2), margemX + 132, y);
-    doc.text(formatBRL(row.valorReceberFinal), margemX + 156, y);
-
-    y += alturaLinha;
-    doc.setDrawColor(230, 230, 230);
-    doc.line(margemX, y - 3, larguraPagina - margemX, y - 3);
-  });
-
-  y += 8;
-  doc.setFontSize(8);
-  doc.setTextColor(90, 90, 90);
-  doc.text(
-    '* Os números referentes a esse sorteio estarão em um PDF assinado e enviado juntamente ao grupo no WhatsApp.',
-    margemX,
-    y,
-    { maxWidth: larguraUtil }
+    () => processedFiles.filter((item) => !item.nomeConfiavel).length,
+    [processedFiles]
   );
 
-  doc.save(fileName);
-};
+  const successCount = useMemo(
+    () => processedFiles.filter((item) => item.nomeConfiavel).length,
+    [processedFiles]
+  );
 
-if (!authenticated) {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
-      <div className="mx-auto max-w-md px-4 py-10 sm:py-16">
-        <Link
-          to={createPageUrl('Home')}
-          className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar ao menu
-        </Link>
+  const sortedProcessedFiles = useMemo(() => {
+    return [...processedFiles].sort((a, b) => {
+      if (a.nomeConfiavel === b.nomeConfiavel) {
+        return a.fileName.localeCompare(b.fileName);
+      }
+      return a.nomeConfiavel ? 1 : -1;
+    });
+  }, [processedFiles]);
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
-              <FileText className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">Acesso restrito</h1>
-              <p className="text-sm text-slate-500">
-                Informe a senha para acessar a Gestão de Cotas.
-              </p>
-            </div>
-          </div>
+  const visibleProcessedFiles = useMemo(() => {
+    if (!showOnlyPending) return sortedProcessedFiles;
+    return sortedProcessedFiles.filter((item) => !item.nomeConfiavel);
+  }, [sortedProcessedFiles, showOnlyPending]);
 
-          <div className="space-y-3">
-            <input
-              type="password"
-              value={accessPassword}
-              onChange={(e) => setAccessPassword(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAccess();
-              }}
-              placeholder="Digite a senha"
-              className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
-            />
+  const exportCSV = () => {
+    const header = [
+      'Título do Bolão',
+      'Concurso',
+      'Nome',
+      'Cotas',
+      'Valor Pago',
+      'Recebe Base',
+      'ADM',
+      'Recebe Final',
+    ];
 
-            <button
-              type="button"
-              onClick={handleAccess}
-              className="h-11 w-full rounded-xl bg-slate-900 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
-            >
-              Entrar
-            </button>
+    const lines = consolidatedRows.map((row) =>
+      [
+        `"${tituloBolao.replace(/"/g, '""')}"`,
+        `"${numeroConcurso.replace(/"/g, '""')}"`,
+        `"${row.nome.replace(/"/g, '""')}"`,
+        row.cotasExibidas.toFixed(2),
+        row.valorPago.toFixed(2),
+        row.valorReceberBase.toFixed(2),
+        row.isAdm ? valorAdmPorPessoa.toFixed(2) : '0.00',
+        row.valorReceberFinal.toFixed(2),
+      ].join(';')
+    );
 
-            {authError && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {authError}
+    downloadBlob(
+      'gestao-cotas.csv',
+      [header.join(';'), ...lines].join('\n'),
+      'text/csv;charset=utf-8'
+    );
+  };
+
+  const totalCotasDocumento = consolidatedRows.reduce(
+    (sum, row) => sum + row.cotasExibidas,
+    0
+  );
+
+  const exportPDF = ({ maskedCpf = false, fileName = 'gestao-cotas.pdf' } = {}) => {
+    const doc = new jsPDF();
+    const titulo = tituloBolao || 'Mega Sena';
+    const margemX = 14;
+    const larguraPagina = doc.internal.pageSize.getWidth();
+    const larguraUtil = larguraPagina - margemX * 2;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text(titulo, margemX, 18);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(90, 90, 90);
+    doc.text(`Concurso Nº ${numeroConcurso || '-'}`, margemX, 26);
+    doc.text(`Número da Compra: ${numeroCompra || '-'}`, margemX, 32);
+    doc.text(`Valor da cota: ${formatBRL(valorCotaNumero)}`, margemX, 38);
+    doc.text(`Total de pagadores: ${consolidatedRows.length}`, margemX, 44);
+    doc.text(`Total de cotas: ${totalCotasDocumento.toFixed(2)}`, margemX, 50);
+    doc.text(`Valor total do prêmio: ${formatBRL(premioNumero)}`, margemX, 56);
+    doc.setTextColor(0, 0, 0);
+
+    let y = 68;
+
+    const drawHeader = () => {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margemX, y - 5, larguraUtil, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('#', margemX + 2, y);
+      doc.text('Nome', margemX + 12, y);
+      doc.text('CPF', margemX + 100, y);
+      doc.text('Cotas', margemX + 132, y);
+      doc.text('Valor Estimado', margemX + 156, y);
+      y += 8;
+    };
+
+    drawHeader();
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+
+    consolidatedRows.forEach((row) => {
+      const nomeLinhas = doc.splitTextToSize(row.nome, 95);
+      const alturaLinha = Math.max(8, nomeLinhas.length * 5);
+
+      if (y + alturaLinha > 275) {
+        doc.addPage();
+        y = 20;
+        drawHeader();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+      }
+
+      doc.text(nomeLinhas, margemX + 12, y);
+      const cpfExibido = maskedCpf ? maskCpf(row.cpf || '') : row.cpf || '';
+      doc.text(cpfExibido, margemX + 100, y);
+      doc.text(row.cotasExibidas.toFixed(2), margemX + 132, y);
+      doc.text(formatBRL(row.valorReceberFinal), margemX + 156, y);
+
+      y += alturaLinha;
+      doc.setDrawColor(230, 230, 230);
+      doc.line(margemX, y - 3, larguraPagina - margemX, y - 3);
+    });
+
+    y += 8;
+    doc.setFontSize(8);
+    doc.setTextColor(90, 90, 90);
+    doc.text(
+      '* Os números referentes a esse sorteio estarão em um PDF assinado e enviado juntamente ao grupo no WhatsApp.',
+      margemX,
+      y,
+      { maxWidth: larguraUtil }
+    );
+
+    doc.save(fileName);
+  };
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
+        <div className="mx-auto max-w-md px-4 py-10 sm:py-16">
+          <Link
+            to={createPageUrl('Home')}
+            className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar ao menu
+          </Link>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-5 flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                <FileText className="h-6 w-6" />
               </div>
-            )}
+              <div>
+                <h1 className="text-xl font-bold text-slate-900">Acesso restrito</h1>
+                <p className="text-sm text-slate-500">
+                  Informe a senha para acessar a Gestão de Cotas.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="password"
+                value={accessPassword}
+                onChange={(e) => setAccessPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAccess();
+                }}
+                placeholder="Digite a senha"
+                className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+              />
+
+              <button
+                type="button"
+                onClick={handleAccess}
+                className="h-11 w-full rounded-xl bg-slate-900 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
+              >
+                Entrar
+              </button>
+
+              {authError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {authError}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
       <div className="max-w-5xl mx-auto px-4 py-8 sm:py-12">
-        <Link to={createPageUrl('Home')} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 mb-8 transition-colors">
+        <Link
+          to={createPageUrl('Home')}
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 mb-8 transition-colors"
+        >
           <ArrowLeft className="h-4 w-4" />
           Voltar ao menu
         </Link>
@@ -1027,7 +1035,9 @@ if (!authenticated) {
           <div className="mx-auto mb-5 h-14 w-14 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200">
             <FileText className="h-7 w-7 text-white" />
           </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">Gestão de Cotas</h1>
+          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">
+            Gestão de Cotas
+          </h1>
           <p className="text-slate-500 mt-3 text-sm sm:text-base">
             Processe comprovantes PIX e calcule cotas automaticamente
           </p>
@@ -1064,15 +1074,15 @@ if (!authenticated) {
 
             <div className="sm:col-span-3">
               <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium text-slate-700">Número da Compra</span>
-              <input
-                type="text"
-                value={numeroCompra}
-                onChange={(e) => setNumeroCompra(e.target.value)}
-                placeholder="Ex.: 496872662"
-                className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
-              />
-             </label>
+                <span className="text-sm font-medium text-slate-700">Número da Compra</span>
+                <input
+                  type="text"
+                  value={numeroCompra}
+                  onChange={(e) => setNumeroCompra(e.target.value)}
+                  placeholder="Ex.: 496872662"
+                  className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
+                />
+              </label>
             </div>
 
             <div className="sm:col-span-4">
@@ -1092,7 +1102,9 @@ if (!authenticated) {
             </div>
 
             <div className="sm:col-span-4">
-              <label className="text-sm text-slate-500 mb-1.5 block">Valor Total do Prêmio (R$)</label>
+              <label className="text-sm text-slate-500 mb-1.5 block">
+                Valor Total do Prêmio (R$)
+              </label>
               <div className="flex items-center gap-2">
                 <span className="text-2xl text-slate-600">R$</span>
                 <input
@@ -1125,7 +1137,9 @@ if (!authenticated) {
             </div>
 
             <div className="sm:col-span-3">
-              <label className="text-sm text-slate-500 mb-1.5 block">Valor a ser Distribuído</label>
+              <label className="text-sm text-slate-500 mb-1.5 block">
+                Valor a ser Distribuído
+              </label>
               <input
                 type="text"
                 readOnly
@@ -1136,21 +1150,85 @@ if (!authenticated) {
             </div>
 
             <div className="sm:col-span-3">
-              <label className="text-sm text-slate-500 mb-1.5 block">Quem é o ADM?</label>
-              <div className="relative">
-                <select
-                  value={admSelecionado}
-                  onChange={(e) => setAdmSelecionado(e.target.value)}
-                  className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-                >
-                  <option value="">Selecione o participante</option>
-                  {participantOptions.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-                <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+              <label className="text-sm text-slate-500 mb-1.5 block">Tipo do bolão</label>
+              <select
+                value={tipoBolao}
+                onChange={(e) => {
+                  const nextTipo = e.target.value;
+                  setTipoBolao(nextTipo);
+                  setAdmSelecionado('');
+                  setAdmMensal1('');
+                  setAdmMensal2('');
+                }}
+                className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200"
+              >
+                <option value="normal">Normal</option>
+                <option value="mensal">Mensal</option>
+              </select>
             </div>
+
+            {tipoBolao === 'normal' ? (
+              <div className="sm:col-span-3">
+                <label className="text-sm text-slate-500 mb-1.5 block">Quem é o ADM?</label>
+                <div className="relative">
+                  <select
+                    value={admSelecionado}
+                    onChange={(e) => setAdmSelecionado(e.target.value)}
+                    className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                  >
+                    <option value="">Selecione o participante</option>
+                    {participantOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 1</label>
+                  <div className="relative">
+                    <select
+                      value={admMensal1}
+                      onChange={(e) => setAdmMensal1(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 2</label>
+                  <div className="relative">
+                    <select
+                      value={admMensal2}
+                      onChange={(e) => setAdmMensal2(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions
+                        .filter((name) => name !== admMensal1)
+                        .map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1170,7 +1248,9 @@ if (!authenticated) {
             <div className="mx-auto mb-4 text-slate-400 flex justify-center">
               <Upload className="h-10 w-10" />
             </div>
-            <p className="text-xl font-medium text-slate-600">Arraste os PDFs aqui ou clique para selecionar</p>
+            <p className="text-xl font-medium text-slate-600">
+              Arraste os PDFs aqui ou clique para selecionar
+            </p>
             <p className="text-sm text-slate-400 mt-2">PDF, JPG e PNG suportados</p>
           </div>
 
@@ -1194,7 +1274,10 @@ if (!authenticated) {
           {files.length > 0 && (
             <div className="mt-5 space-y-2">
               {files.map((file) => (
-                <div key={file.name} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5 bg-slate-50">
+                <div
+                  key={file.name}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5 bg-slate-50"
+                >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-700 truncate">{file.name}</p>
                     <p className="text-xs text-slate-500">{(file.size / 1024).toFixed(1)} KB</p>
@@ -1218,7 +1301,9 @@ if (!authenticated) {
             disabled={processing || !files.length}
             className="mt-5 w-full h-12 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {processing ? 'Processando...' : `Processar ${files.length || 0} comprovante${files.length === 1 ? '' : 's'}`}
+            {processing
+              ? 'Processando...'
+              : `Processar ${files.length || 0} comprovante${files.length === 1 ? '' : 's'}`}
           </button>
 
           {error && (
@@ -1227,123 +1312,128 @@ if (!authenticated) {
             </div>
           )}
         </div>
-{processedFiles.length > 0 && (
-  <div className="mb-4 space-y-3">
-    <div className="grid gap-3 md:grid-cols-3">
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-        <div className="text-sm text-emerald-700">Identificados</div>
-        <div className="text-2xl font-semibold text-emerald-900">{successCount}</div>
-      </div>
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-        <div className="text-sm text-amber-700">Precisam de revisão</div>
-        <div className="text-2xl font-semibold text-amber-900">{reviewCount}</div>
-      </div>
+        {processedFiles.length > 0 && (
+          <div className="mb-4 space-y-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <div className="text-sm text-emerald-700">Identificados</div>
+                <div className="text-2xl font-semibold text-emerald-900">{successCount}</div>
+              </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-        <div className="text-sm text-slate-600">Total processado</div>
-        <div className="text-2xl font-semibold text-slate-900">{processedFiles.length}</div>
-      </div>
-    </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="text-sm text-amber-700">Precisam de revisão</div>
+                <div className="text-2xl font-semibold text-amber-900">{reviewCount}</div>
+              </div>
 
-    <div className="flex flex-wrap gap-3">
-  <button
-    type="button"
-    onClick={() => baseInputRef.current?.click()}
-    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-  >
-    <FileSpreadsheet className="h-4 w-4" />
-    Importar base de dados
-  </button>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-sm text-slate-600">Total processado</div>
+                <div className="text-2xl font-semibold text-slate-900">{processedFiles.length}</div>
+              </div>
+            </div>
 
-  <button
-    type="button"
-    onClick={aplicarBaseAosProcessados}
-    disabled={!processedFiles.length || !baseClientes.length}
-    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-  >
-    <CheckCircle2 className="h-4 w-4" />
-    Aplicar base aos registros
-  </button>
-</div>
-{baseInfo && (
-  <p className="mt-2 text-sm text-slate-500">
-    {baseInfo}
-  </p>
-)}
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => baseInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Importar base de dados
+              </button>
 
-    <button
-      type="button"
-      onClick={() => setShowOnlyPending((prev) => !prev)}
-      className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-    >
-      {showOnlyPending ? 'Mostrar todos' : `Mostrar só pendências (${reviewCount})`}
-    </button>
-  </div>
-)}
+              <button
+                type="button"
+                onClick={aplicarBaseAosProcessados}
+                disabled={!processedFiles.length || !baseClientes.length}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Aplicar base aos registros
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowOnlyPending((prev) => !prev)}
+                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {showOnlyPending ? 'Mostrar todos' : `Mostrar só pendências (${reviewCount})`}
+              </button>
+            </div>
+
+            {baseInfo && <p className="mt-2 text-sm text-slate-500">{baseInfo}</p>}
+          </div>
+        )}
+
         {(processedFiles.length > 0 || consolidatedRows.length > 0) && (
           <div className="grid lg:grid-cols-[1fr_1fr] gap-6">
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-slate-800">Processamento</h2>
-                <span className="text-sm text-slate-500">{processedFiles.length}/{files.length} concluídos</span>
+                <span className="text-sm text-slate-500">
+                  {processedFiles.length}/{files.length} concluídos
+                </span>
               </div>
-<div className="rounded-2xl border border-slate-200 bg-white p-4">
-  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <div className="text-sm font-semibold text-slate-900">Adicionar participante sem comprovante</div>
-      <div className="text-sm text-slate-500">
-        Use quando a pessoa pagou, mas não conseguiu enviar o comprovante.
-      </div>
-    </div>
 
-    <button
-      type="button"
-      onClick={() => setManualOpen((prev) => !prev)}
-      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-    >
-      <Edit3 className="h-4 w-4" />
-      {manualOpen ? 'Fechar' : 'Adicionar manualmente'}
-    </button>
-  </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">
+                      Adicionar participante sem comprovante
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Use quando a pessoa pagou, mas não conseguiu enviar o comprovante.
+                    </div>
+                  </div>
 
-  {manualOpen && (
-    <div className="mt-4 grid gap-3 md:grid-cols-4">
-      <input
-        type="text"
-        value={manualName}
-        onChange={(e) => setManualName(e.target.value)}
-        placeholder="Nome do participante"
-        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
-      />
+                  <button
+                    type="button"
+                    onClick={() => setManualOpen((prev) => !prev)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    {manualOpen ? 'Fechar' : 'Adicionar manualmente'}
+                  </button>
+                </div>
 
-      <input
-        type="text"
-        value={manualValorPago}
-        onChange={(e) => setManualValorPago(e.target.value)}
-        placeholder="Valor pago ex: 12,00"
-        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
-      />
+                {manualOpen && (
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <input
+                      type="text"
+                      value={manualName}
+                      onChange={(e) => setManualName(e.target.value)}
+                      placeholder="Nome do participante"
+                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+                    />
 
-      <input
-        type="text"
-        value={manualCpf}
-        onChange={(e) => setManualCpf(e.target.value)}
-        placeholder="CPF (opcional)"
-        className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
-      />
+                    <input
+                      type="text"
+                      value={manualValorPago}
+                      onChange={(e) => setManualValorPago(e.target.value)}
+                      placeholder="Valor pago ex: 12,00"
+                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+                    />
 
-      <button
-        type="button"
-        onClick={addManualParticipant}
-        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-      >
-        <CheckCircle2 className="h-4 w-4" />
-        Salvar manualmente
-      </button>
-    </div>
-  )}
-</div>
+                    <input
+                      type="text"
+                      value={manualCpf}
+                      onChange={(e) => setManualCpf(e.target.value)}
+                      placeholder="CPF (opcional)"
+                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-400"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={addManualParticipant}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Salvar manualmente
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3">
                 {visibleProcessedFiles.map((item) => (
                   <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1360,71 +1450,73 @@ if (!authenticated) {
 
                         {editingId === item.id ? (
                           <div className="flex flex-col gap-2 mt-2">
-  <input
-    value={draftName}
-    onChange={(e) => {
-      const novoNome = e.target.value;
-      setDraftName(novoNome);
+                            <input
+                              value={draftName}
+                              onChange={(e) => {
+                                const novoNome = e.target.value;
+                                setDraftName(novoNome);
 
-      const clienteEncontrado = findClientByName(novoNome, baseClientes);
-      const cpfAtualLimpo = sanitizeCpf(draftCpf);
-      const cpfEncontradoLimpo = sanitizeCpf(clienteEncontrado?.cpf || '');
+                                const clienteEncontrado = findClientByName(novoNome, baseClientes);
+                                const cpfAtualLimpo = sanitizeCpf(draftCpf);
+                                const cpfEncontradoLimpo = sanitizeCpf(clienteEncontrado?.cpf || '');
 
-      if (!cpfAtualLimpo || cpfAtualLimpo === cpfEncontradoLimpo) {
-        setDraftCpf(clienteEncontrado?.cpf || '');
-      }
-    }}
-    className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
-    placeholder="Nome do participante"
-  />
-  <input
-    value={draftCpf}
-    onChange={(e) => setDraftCpf(e.target.value)}
-    placeholder="CPF (opcional)"
-    className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
-  />
-  <input
-    type="number"
-    min="0"
-    step="0.01"
-    value={draftCotas}
-    onChange={(e) => setDraftCotas(e.target.value)}
-    placeholder="Quantidade de cotas"
-    className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
-  />
-  <input
-    type="text"
-    value={draftValorPago}
-    onChange={(e) => setDraftValorPago(e.target.value)}
-    placeholder="Ex.: 25,00"
-    className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
-  />
-  <button
-    type="button"
-    onClick={saveEdit}
-    className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-medium"
-  >
-    Salvar
-  </button>
-</div>
+                                if (!cpfAtualLimpo || cpfAtualLimpo === cpfEncontradoLimpo) {
+                                  setDraftCpf(clienteEncontrado?.cpf || '');
+                                }
+                              }}
+                              className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
+                              placeholder="Nome do participante"
+                            />
+                            <input
+                              value={draftCpf}
+                              onChange={(e) => setDraftCpf(e.target.value)}
+                              placeholder="CPF (opcional)"
+                              className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={draftCotas}
+                              onChange={(e) => setDraftCotas(e.target.value)}
+                              placeholder="Quantidade de cotas"
+                              className="w-full h-10 rounded-xl border border-slate-200 px-3 outline-none focus:ring-2 focus:ring-blue-200"
+                            />
+                            <input
+                              type="text"
+                              value={draftValorPago}
+                              onChange={(e) => setDraftValorPago(e.target.value)}
+                              placeholder="Ex.: 25,00"
+                              className="rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-slate-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={saveEdit}
+                              className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-medium"
+                            >
+                              Salvar
+                            </button>
+                          </div>
                         ) : (
                           <>
                             <p className="text-sm text-slate-700">{item.nome}</p>
                             <p className="text-xs text-slate-500 mt-1">
-                              {formatBRL(item.valorPago)} — {(
+                              {formatBRL(item.valorPago)} —{' '}
+                              {(
                                 item.cotasManual !== undefined && item.cotasManual !== null
                                   ? item.cotasManual
                                   : item.cotas
-                              ).toFixed(2)} cota(s)
+                              ).toFixed(2)}{' '}
+                              cota(s)
                             </p>
                             <button
-  type="button"
-  onClick={() => deleteRecord(item.id)}
-  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
->
-  <Trash2 size={16} />
-  Apagar registro
-</button>
+                              type="button"
+                              onClick={() => deleteRecord(item.id)}
+                              className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 mt-2"
+                            >
+                              <Trash2 size={16} />
+                              Apagar registro
+                            </button>
                             {!item.nomeConfiavel && (
                               <p className="text-xs text-amber-600 mt-1">
                                 Nome não identificado com segurança. Edite manualmente para consolidar corretamente.
@@ -1437,7 +1529,9 @@ if (!authenticated) {
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => setExpandedRawId(expandedRawId === item.id ? null : item.id)}
+                          onClick={() =>
+                            setExpandedRawId(expandedRawId === item.id ? null : item.id)
+                          }
                           className="text-sm text-slate-500 hover:text-slate-700 font-medium"
                         >
                           {expandedRawId === item.id ? 'Ocultar texto' : 'Ver texto extraído'}
@@ -1452,46 +1546,80 @@ if (!authenticated) {
                         </button>
                       </div>
                     </div>
-                    
-                      {expandedRawId === item.id && (
-                        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Texto extraído do PDF</p>
-                          <pre className="text-[11px] leading-5 text-slate-600 whitespace-pre-wrap break-words max-h-56 overflow-auto">
-                            {item.rawText || 'Nenhum texto extraído.'}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+
+                    {expandedRawId === item.id && (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                          Texto extraído do PDF
+                        </p>
+                        <pre className="text-[11px] leading-5 text-slate-600 whitespace-pre-wrap break-words max-h-56 overflow-auto">
+                          {item.rawText || 'Nenhum texto extraído.'}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="space-y-6">
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
                 <h2 className="text-lg font-semibold text-slate-800 mb-4">Resumo</h2>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-                    <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-1">Valor da cota</p>
+                    <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-1">
+                      Valor da cota
+                    </p>
                     <p className="text-xl font-bold text-blue-700">{formatBRL(valorCotaNumero)}</p>
                   </div>
+
                   <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4">
-                    <p className="text-xs font-semibold text-violet-500 uppercase tracking-wider mb-1">Total arrecadado</p>
+                    <p className="text-xs font-semibold text-violet-500 uppercase tracking-wider mb-1">
+                      Total arrecadado
+                    </p>
                     <p className="text-xl font-bold text-violet-700">{formatBRL(totalArrecadado)}</p>
                   </div>
+
                   <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
-                    <p className="text-xs font-semibold text-red-500 uppercase tracking-wider mb-1">Taxa ADM</p>
+                    <p className="text-xs font-semibold text-red-500 uppercase tracking-wider mb-1">
+                      Taxa ADM
+                    </p>
                     <p className="text-xl font-bold text-red-700">{formatBRL(valorAdmPremio)}</p>
                   </div>
+
                   <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
-                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-1">Valor por cota distribuída</p>
-                    <p className="text-xl font-bold text-emerald-700">{formatBRL(valorPorCotaDistribuicao)}</p>
+                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-1">
+                      Valor por cota distribuída
+                    </p>
+                    <p className="text-xl font-bold text-emerald-700">
+                      {formatBRL(valorPorCotaDistribuicao)}
+                    </p>
                   </div>
                 </div>
-                {admSelecionado && (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    <p className="text-sm font-medium text-amber-800">
-                      ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
+
+                {mensalInvalido && (
+                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-sm font-medium text-red-700">
+                      No modo mensal, selecione dois administradores diferentes.
                     </p>
+                  </div>
+                )}
+
+                {adminsAtivos.length > 0 && !mensalInvalido && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    {tipoBolao === 'mensal' ? (
+                      <p className="text-sm font-medium text-amber-800">
+                        ADMs mensais: <span className="font-bold">{admMensal1}</span> e{' '}
+                        <span className="font-bold">{admMensal2}</span> — receberão{' '}
+                        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
+                      </p>
+                    ) : (
+                      <p className="text-sm font-medium text-amber-800">
+                        ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá{' '}
+                        {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1501,20 +1629,22 @@ if (!authenticated) {
                   <div>
                     <h2 className="text-lg font-semibold text-slate-800">Resultado Consolidado</h2>
                     <p className="text-sm text-slate-500 mt-1">
-                      {consolidatedRows.length} participante(s) · {cotasVendidas.toFixed(2)} cotas · {formatBRL(totalPago)} pago
+                      {consolidatedRows.length} participante(s) · {cotasVendidas.toFixed(2)} cotas ·{' '}
+                      {formatBRL(totalPago)} pago
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={exportCSV}
-                      disabled={!consolidatedRows.length}
+                      disabled={!consolidatedRows.length || mensalInvalido}
                       className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
                     >
                       <FileSpreadsheet className="h-4 w-4" />
                       Excel
                     </button>
+
                     <button
                       type="button"
                       onClick={() =>
@@ -1523,11 +1653,13 @@ if (!authenticated) {
                           fileName: 'gestao-cotas-compartilhar.pdf',
                         })
                       }
-                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                      disabled={!consolidatedRows.length || mensalInvalido}
+                      className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                     >
                       <FileText className="h-4 w-4" />
                       PDF para compartilhar
                     </button>
+
                     <button
                       type="button"
                       onClick={() =>
@@ -1536,7 +1668,8 @@ if (!authenticated) {
                           fileName: 'gestao-cotas-oficial.pdf',
                         })
                       }
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      disabled={!consolidatedRows.length || mensalInvalido}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                     >
                       <FileText className="h-4 w-4" />
                       PDF oficial
@@ -1573,8 +1706,12 @@ if (!authenticated) {
                             </span>
                           </td>
                           <td className="py-3 pr-3 text-slate-700">{formatBRL(row.valorPago)}</td>
-                          <td className="py-3 pr-3 font-semibold text-emerald-700">{formatBRL(row.valorReceberFinal)}</td>
-                          <td className="py-3 text-slate-500">{row.isAdm ? 'Cotas + taxa ADM' : row.individual ? 'Revisão manual' : 'Participante'}</td>
+                          <td className="py-3 pr-3 font-semibold text-emerald-700">
+                            {formatBRL(row.valorReceberFinal)}
+                          </td>
+                          <td className="py-3 text-slate-500">
+                            {row.isAdm ? 'Cotas + taxa ADM' : row.individual ? 'Revisão manual' : 'Participante'}
+                          </td>
                           <td className="py-3 pr-3 text-slate-600">{row.cpf || ''}</td>
                         </tr>
                       ))}
