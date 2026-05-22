@@ -423,6 +423,7 @@ export default function GestaoCotas() {
 
   const [tipoBolao, setTipoBolao] = useState('normal');
   const [admSelecionado, setAdmSelecionado] = useState('');
+  const [admSelecionado2, setAdmSelecionado2] = useState('');
   const [admMensal1, setAdmMensal1] = useState('');
   const [admMensal2, setAdmMensal2] = useState('');
 
@@ -705,19 +706,29 @@ export default function GestaoCotas() {
   const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
 
   const adminsAtivos = useMemo(() => {
-    if (tipoBolao === 'mensal') {
-      return [admMensal1, admMensal2].filter(Boolean);
-    }
+  if (tipoBolao === 'mensal') {
+    return [admMensal1, admMensal2].filter(Boolean);
+  }
 
-    return admSelecionado ? [admSelecionado] : [];
-  }, [tipoBolao, admSelecionado, admMensal1, admMensal2]);
+  return [admSelecionado, admSelecionado2]
+    .filter(Boolean)
+    .filter((name, index, arr) => arr.indexOf(name) === index);
+}, [tipoBolao, admSelecionado, admSelecionado2, admMensal1, admMensal2]);
 
   const valorAdmPorPessoa =
     adminsAtivos.length > 0 ? valorAdmPremio / adminsAtivos.length : 0;
 
   const mensalInvalido =
-    tipoBolao === 'mensal' &&
-    (!admMensal1 || !admMensal2 || admMensal1 === admMensal2);
+  tipoBolao === 'mensal' &&
+  (!admMensal1 || !admMensal2 || admMensal1 === admMensal2);
+
+const normalInvalido =
+  tipoBolao === 'normal' &&
+  admSelecionado &&
+  admSelecionado2 &&
+  admSelecionado === admSelecionado2;
+
+const selecaoAdmInvalida = mensalInvalido || normalInvalido;
 
   const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
     const cotasItem =
@@ -1157,6 +1168,7 @@ export default function GestaoCotas() {
                   const nextTipo = e.target.value;
                   setTipoBolao(nextTipo);
                   setAdmSelecionado('');
+                  setAdmSelecionado2('');
                   setAdmMensal1('');
                   setAdmMensal2('');
                 }}
@@ -1168,67 +1180,90 @@ export default function GestaoCotas() {
             </div>
 
             {tipoBolao === 'normal' ? (
-              <div className="sm:col-span-3">
-                <label className="text-sm text-slate-500 mb-1.5 block">Quem é o ADM?</label>
-                <div className="relative">
-                  <select
-                    value={admSelecionado}
-                    onChange={(e) => setAdmSelecionado(e.target.value)}
-                    className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-                  >
-                    <option value="">Selecione o participante</option>
-                    {participantOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                  <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="sm:col-span-3">
-                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 1</label>
-                  <div className="relative">
-                    <select
-                      value={admMensal1}
-                      onChange={(e) => setAdmMensal1(e.target.value)}
-                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-                    >
-                      <option value="">Selecione o participante</option>
-                      {participantOptions.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                </div>
+  <>
+    <div className="sm:col-span-3">
+      <label className="text-sm text-slate-500 mb-1.5 block">ADM 1</label>
+      <div className="relative">
+        <select
+          value={admSelecionado}
+          onChange={(e) => setAdmSelecionado(e.target.value)}
+          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+        >
+          <option value="">Selecione o participante</option>
+          {participantOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
 
-                <div className="sm:col-span-3">
-                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 2</label>
-                  <div className="relative">
-                    <select
-                      value={admMensal2}
-                      onChange={(e) => setAdmMensal2(e.target.value)}
-                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-                    >
-                      <option value="">Selecione o participante</option>
-                      {participantOptions
-                        .filter((name) => name !== admMensal1)
-                        .map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                    </select>
-                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
-                </div>
-              </>
-            )}
+    <div className="sm:col-span-3">
+      <label className="text-sm text-slate-500 mb-1.5 block">ADM 2</label>
+      <div className="relative">
+        <select
+          value={admSelecionado2}
+          onChange={(e) => setAdmSelecionado2(e.target.value)}
+          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+        >
+          <option value="">Selecione o participante</option>
+          {participantOptions
+            .filter((name) => name !== admSelecionado)
+            .map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+        </select>
+        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
+  </>
+) : (
+  <>
+    <div className="sm:col-span-3">
+      <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 1</label>
+      <div className="relative">
+        <select
+          value={admMensal1}
+          onChange={(e) => setAdmMensal1(e.target.value)}
+          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+        >
+          <option value="">Selecione o participante</option>
+          {participantOptions.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
+
+    <div className="sm:col-span-3">
+      <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 2</label>
+      <div className="relative">
+        <select
+          value={admMensal2}
+          onChange={(e) => setAdmMensal2(e.target.value)}
+          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+        >
+          <option value="">Selecione o participante</option>
+          {participantOptions
+            .filter((name) => name !== admMensal1)
+            .map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+        </select>
+        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
+  </>
+)}
           </div>
         </div>
 
@@ -1599,29 +1634,43 @@ export default function GestaoCotas() {
                 </div>
 
                 {mensalInvalido && (
-                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-                    <p className="text-sm font-medium text-red-700">
-                      No modo mensal, selecione dois administradores diferentes.
-                    </p>
-                  </div>
-                )}
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-sm font-medium text-red-700">
+                    No modo mensal, selecione dois administradores diferentes.
+                  </p>
+                </div>
+              )}
 
-                {adminsAtivos.length > 0 && !mensalInvalido && (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                    {tipoBolao === 'mensal' ? (
-                      <p className="text-sm font-medium text-amber-800">
-                        ADMs mensais: <span className="font-bold">{admMensal1}</span> e{' '}
-                        <span className="font-bold">{admMensal2}</span> — receberão{' '}
-                        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
-                      </p>
-                    ) : (
-                      <p className="text-sm font-medium text-amber-800">
-                        ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá{' '}
-                        {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
-                      </p>
-                    )}
-                  </div>
-                )}
+              {normalInvalido && (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-sm font-medium text-red-700">
+                    No modo normal, selecione dois administradores diferentes.
+                  </p>
+                </div>
+              )}
+
+                {adminsAtivos.length > 0 && !selecaoAdmInvalida && (
+  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+    {tipoBolao === 'mensal' ? (
+      <p className="text-sm font-medium text-amber-800">
+        ADMs mensais: <span className="font-bold">{admMensal1}</span> e{' '}
+        <span className="font-bold">{admMensal2}</span> — receberão{' '}
+        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
+      </p>
+    ) : adminsAtivos.length === 2 ? (
+      <p className="text-sm font-medium text-amber-800">
+        ADMs selecionados: <span className="font-bold">{admSelecionado}</span> e{' '}
+        <span className="font-bold">{admSelecionado2}</span> — receberão{' '}
+        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
+      </p>
+    ) : (
+      <p className="text-sm font-medium text-amber-800">
+        ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá{' '}
+        {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
+      </p>
+    )}
+  </div>
+)}
               </div>
 
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -1638,7 +1687,7 @@ export default function GestaoCotas() {
                     <button
                       type="button"
                       onClick={exportCSV}
-                      disabled={!consolidatedRows.length || mensalInvalido}
+                      disabled={!consolidatedRows.length || selecaoAdmInvalida}
                       className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
                     >
                       <FileSpreadsheet className="h-4 w-4" />
