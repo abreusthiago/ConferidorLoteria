@@ -333,6 +333,154 @@ async function extractFileText(file) {
   return '';
 }
 
+function normalizeBankStatementText(text) {
+  return String(text || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\r/g, '')
+    .replace(/R\$\s*/g, 'R$ ')
+    .replace(/-R\$\s*/g, '-R$ ')
+    .replace(/(?<=\d)R\$/g, ' R$ ')
+    .replace(/(?<=\d)(\d{2}\/\d{2}\b)/g, ' $1')
+    .replace(/(?<=\b(?:PIX|Pagamento|Saldo|dia|RECEBIDO|C6|PIX))(?=\d{2}\/\d{2}\b)/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+}
+
+function titleCasePreserve(value = '') {
+  return value
+    .toLowerCase()
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (['de', 'da', 'do', 'das', 'dos', 'e'].includes(lower)) return lower;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+}
+
+function cleanupStatementName(raw = '') {
+  return String(raw)
+    .replace(/\b\d{11,14}\b/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function parseBRLToNumber(value = '') {
+  const normalized = String(value).replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+  const number = Number(normalized);
+  return Number.isNaN(number) ? 0 : number;
+}
+
+function extractC6PixRecebidos(text, fileName = 'Extrato C6') {
+  const normalized = normalizeBankStatementText(text);
+
+  const statementRegex =
+    /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(Entrada PIX|Saída PIX|Devolução PIX|Pagamento)\s+(.+?)\s+(-?R\$ ?\d{1,3}(?:\.\d{3})*,\d{2})(?=\s+\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+(?:Entrada PIX|Saída PIX|Pagamento|Devolução PIX)|\s+Saldo do dia|\s+Informações sujeitas|$)/gis;
+
+  const allRows = [];
+  let match;
+
+  while ((match = statementRegex.exec(normalized)) !== null) {
+    const [, dataLancamento, dataContabil, tipo, descricaoRaw, valorRaw] = match;
+    const descricao = descricaoRaw.trim();
+    const valorPago = Math.abs(parseBRLToNumber(valorRaw));
+
+    let nome = 'Não identificado';
+    let nomeConfiavel = false;
+    let confiancaNome = 'low';
+
+    const explicitNameMatch = descricao.match(/pix recebido de\s+(.+)/i);
+
+    if (tipo === 'Entrada PIX') {
+      if (explicitNameMatch) {
+        nome = titleCasePreserve(cleanupStatementName(explicitNameMatch[1]));
+        nomeConfiavel = Boolean(nome && nome !== 'Não identificado');
+        confiancaNome = nomeConfiavel ? 'high' : 'low';
+      } else if (/^pix recebido(?: c6)?$/i.test(descricao)) {
+        const valorLimpo = valorRaw.replace(/\s+/g, '').replace('R$', '');
+        const sequenciaDoDia =
+          allRows.filter(
+            (e) =>
+              e.tipo === 'Entrada PIX' &&
+              e.data === dataLancamento &&
+              String(e.nome || '').startsWith('Não identificado')
+          ).length + 1;
+
+        nome = `Não identificado - ${dataLancamento} - R$ ${valorLimpo} - #${sequenciaDoDia}`;
+        nomeConfiavel = false;
+        confiancaNome = 'low';
+      }
+    }
+
+    allRows.push({
+      id: `${fileName}-${dataLancamento}-${dataContabil}-${allRows.length + 1}`,
+      fileName,
+      banco: 'C6',
+      data: dataLancamento,
+      dataContabil,
+      tipo,
+      descricao,
+      origem:
+        tipo === 'Entrada PIX'
+          ? 'PIX RECEBIDO'
+          : tipo === 'Devolução PIX'
+          ? 'DEVOLUCAO PIX'
+          : tipo,
+      nome,
+      nomeConfiavel,
+      confiancaNome,
+      valorTexto: valorRaw.replace(/^-?R\$\s*/, '').trim(),
+      valorPago,
+      rawText: match[0].trim(),
+    });
+  }
+
+  const entradas = allRows.filter((row) => row.tipo === 'Entrada PIX');
+  const devolucoes = allRows.filter((row) => row.tipo === 'Devolução PIX');
+
+  const entriesFiltradas = [...entradas];
+
+  for (const devolucao of devolucoes) {
+    let index = -1;
+
+    const nomeDevolvidoMatch = devolucao.descricao.match(/de\s+(.+)/i);
+    const nomeDevolvido = nomeDevolvidoMatch
+      ? titleCasePreserve(cleanupStatementName(nomeDevolvidoMatch[1]))
+      : '';
+
+    if (nomeDevolvido) {
+      index = entriesFiltradas.findIndex(
+        (entry) =>
+          entry.valorPago === devolucao.valorPago &&
+          entry.nome.toLowerCase() === nomeDevolvido.toLowerCase()
+      );
+    }
+
+    if (index === -1) {
+      for (let i = entriesFiltradas.length - 1; i >= 0; i--) {
+        const entry = entriesFiltradas[i];
+        if (entry.valorPago === devolucao.valorPago) {
+          index = i;
+          break;
+        }
+      }
+    }
+
+    if (index !== -1) {
+      entriesFiltradas.splice(index, 1);
+    }
+  }
+
+  const SELF_NAME = 'THIAGO SOUZA DE ABREU';
+
+  return entriesFiltradas.filter((entry) => {
+    const nomeNormalizado = String(entry.nome || '').toUpperCase().trim();
+    return nomeNormalizado !== SELF_NAME;
+  });
+}
+
 function buildConsolidatedRows(items = [], valorCota = 0, admName = '', valorAdmPremio = 0) {
   const result = [];
   const grouped = new Map();
@@ -569,22 +717,51 @@ export default function GestaoCotas() {
       const results = [];
 
       for (const file of files) {
-        const extractedText = await extractFileText(file);
-        const parsed = extractReceiptData(extractedText, file.name);
-        const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
+  const extractedText = await extractFileText(file);
+  const normalizedText = normalizeBankStatementText(extractedText);
 
-        results.push({
-          id: crypto.randomUUID(),
-          fileName: file.name,
-          nome: parsed.nome,
-          nomeConfiavel: parsed.nomeConfiavel,
-          confiancaNome: parsed.confiancaNome,
-          valorPago: parsed.valorPago,
-          cotas: valorCotaNumero > 0 ? parsed.valorPago / valorCotaNumero : 0,
-          rawText: parsed.originalText,
-          cpf: encontradoNaBase?.cpf || '',
-        });
-      }
+  const isC6Statement =
+    /extrato/i.test(normalizedText) &&
+    /c6/i.test(normalizedText) &&
+    /entrada pix/i.test(normalizedText);
+
+  if (isC6Statement) {
+    const c6Entries = extractC6PixRecebidos(normalizedText, file.name);
+
+    for (const item of c6Entries) {
+      const encontradoNaBase = findClientByName(item.nome, baseClientes);
+
+      results.push({
+        id: item.id,
+        fileName: item.fileName,
+        nome: item.nome,
+        nomeConfiavel: item.nomeConfiavel,
+        confiancaNome: item.confiancaNome,
+        valorPago: item.valorPago,
+        cotas: valorCotaNumero > 0 ? item.valorPago / valorCotaNumero : 0,
+        rawText: item.rawText,
+        cpf: encontradoNaBase?.cpf || '',
+      });
+    }
+
+    continue;
+  }
+
+  const parsed = extractReceiptData(extractedText, file.name);
+  const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
+
+  results.push({
+    id: crypto.randomUUID(),
+    fileName: file.name,
+    nome: parsed.nome,
+    nomeConfiavel: parsed.nomeConfiavel,
+    confiancaNome: parsed.confiancaNome,
+    valorPago: parsed.valorPago,
+    cotas: valorCotaNumero > 0 ? parsed.valorPago / valorCotaNumero : 0,
+    rawText: parsed.originalText,
+    cpf: encontradoNaBase?.cpf || '',
+  });
+}
 
       setProcessedFiles(results);
     } catch (err) {
