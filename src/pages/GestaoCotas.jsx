@@ -142,6 +142,24 @@ function titleCaseName(value = '') {
     .join(' ');
 }
 
+
+
+  function normalizePersonName(value = '') {
+    return String(value)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+function findSaldoByName(nome = '', base = []) {
+  const alvo = normalizePersonName(nome);
+  return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
+}
+
+
+
 function extractPreferredPayerName(text = '') {
   const cleanedText = normalizeOCRText(text);
     if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
@@ -584,6 +602,120 @@ export default function GestaoCotas() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authError, setAuthError] = useState('');
 
+  const saldoInputRef = useRef(null);
+  const [saldosAnteriores, setSaldosAnteriores] = useState([]);
+  const [saldoInfo, setSaldoInfo] = useState('');
+
+function parseSaldoAmount(value = '') {
+  const raw = String(value || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/^R\$\s*/i, '')
+    .trim();
+
+  if (!raw) return 0;
+
+  if (/^\d+$/.test(raw)) {
+    return Number(raw) / 100;
+  }
+
+  if (/^\d+,\d{2}$/.test(raw)) {
+    return Number(raw.replace(',', '.'));
+  }
+
+  if (/^\d{1,3}(\.\d{3})+,\d{2}$/.test(raw)) {
+    return Number(raw.replace(/\./g, '').replace(',', '.'));
+  }
+
+  if (/^\d+\.\d{2}$/.test(raw)) {
+    return Number(raw);
+  }
+
+  return 0;
+}
+
+function parseSaldoCsv(text = '') {
+  const cleanedText = String(text || '').replace(/\uFEFF/g, '');
+
+  const lines = cleanedText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  return lines
+    .filter((line) => {
+      const normalized = line
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+      return normalized !== 'nome;valor' && normalized !== 'nome';
+    })
+    .map((line) => {
+      const [nome, valorTexto = ''] = line.split(';');
+
+      if (!nome || !valorTexto) return null;
+
+      const valor = parseSaldoAmount(valorTexto);
+
+      if (valor <= 0) return null;
+
+      return {
+        nome: titleCaseName(nome.trim()),
+        valor,
+      };
+    })
+    .filter(Boolean);
+}
+
+const importSaldosAnteriores = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const parsed = parseSaldoCsv(text);
+
+    console.log('PARSED SALDOS:', parsed);
+    console.log('VALORES:', parsed.map((item) => item.valor));
+
+    if (!parsed.length) {
+      setError('A base de saldos não possui registros válidos. Use o formato nome;valor.');
+      return;
+    }
+
+    console.log('TEXTO CSV:', text);
+    console.log('PARSED SALDOS:', parsed);
+
+    const novosLancamentos = parsed.map((item) => {
+      const encontradoNaBase = findClientByName(item.nome, baseClientes);
+
+      return {
+        id: crypto.randomUUID(),
+        fileName: 'Saldo anterior',
+        nome: item.nome,
+        nomeConfiavel: true,
+        confiancaNome: 'saldo',
+        valorPago: item.valor,
+        cotas: valorCotaNumero > 0 ? item.valor / valorCotaNumero : 0,
+        cotasManual: null,
+        rawText: `Importado por saldo anterior: ${item.nome} - ${formatBRL(item.valor)}`,
+        cpf: encontradoNaBase?.cpf || '',
+      };
+    });
+
+    setProcessedFiles((prev) => [...novosLancamentos, ...prev]);
+    setSaldoInfo(`${novosLancamentos.length} saldo(s) anterior(es) importado(s).`);
+    setError('');
+  } catch (err) {
+    console.error(err);
+    setError('Não foi possível importar a base de saldos anteriores.');
+  } finally {
+    event.target.value = '';
+  }
+};
   const handleAccess = () => {
     if (accessPassword === ADMIN_PASSWORD) {
       setAuthenticated(true);
@@ -594,14 +726,6 @@ export default function GestaoCotas() {
     setAuthError('Senha incorreta.');
   };
 
-  function normalizePersonName(value = '') {
-    return String(value)
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
 
   function sanitizeCpf(value = '') {
     return String(value).replace(/\D/g, '');
@@ -624,27 +748,53 @@ export default function GestaoCotas() {
     return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
   }
 
-  function parseBaseCsv(text = '') {
-    const lines = String(text)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+function parseSaldoCsv(text = '') {
+  const cleanedText = String(text || '').replace(/\uFEFF/g, '');
 
-    if (!lines.length) return [];
+  const lines = cleanedText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-    return lines
-      .slice(1)
-      .map((line) => {
-        const [nome, cpf] = line.split(';');
-        if (!nome || !cpf) return null;
+  if (!lines.length) return [];
 
-        return {
-          nome: titleCaseName(nome.trim()),
-          cpf: formatCpf(cpf.trim()),
-        };
-      })
-      .filter((item) => item && item.nome && sanitizeCpf(item.cpf).length === 11);
-  }
+  return lines
+    .filter((line) => {
+      const normalized = line
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+      return normalized !== 'nome;valor' && normalized !== 'nome';
+    })
+    .map((line) => {
+      const parts = line.split(';');
+
+      if (parts.length < 2) return null;
+
+      const nome = parts[0].trim();
+      const valorTexto = parts[1].trim().replace(/\D/g, '');
+
+      if (!nome || !valorTexto) return null;
+
+      const valor = Number(valorTexto) / 100;
+
+      if (!Number.isFinite(valor) || valor <= 0) return null;
+
+      return {
+        nome: titleCaseName(nome),
+        valor,
+      };
+    })
+    .filter(Boolean);
+}
+
+function findSaldoByName(nome = '', base = []) {
+  const alvo = normalizePersonName(nome);
+  return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
+}
+
 
   const importBaseClientes = async (event) => {
     const file = event.target.files?.[0];
@@ -932,81 +1082,118 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
   }, [processedFiles]);
 
   const consolidatedRows = useMemo(() => {
-    const grouped = new Map();
-    const loose = [];
+  const grouped = new Map();
+  const loose = [];
 
-    processedFiles.forEach((item) => {
-      const cotas =
-        item.cotasManual !== undefined && item.cotasManual !== null
-          ? Number(item.cotasManual)
-          : valorCotaNumero > 0
-            ? item.valorPago / valorCotaNumero
-            : 0;
-
-      if (!item.nomeConfiavel) {
-        loose.push({
-          id: item.id,
-          nome: item.nome,
-          cpf: item.cpf || '',
-          cotasOriginais: cotas,
-          cotasExibidas: cotas,
-          valorPago: item.valorPago,
-          individual: true,
-          isAdm: false,
-          valorReceberBase: 0,
-          valorReceberFinal: 0,
-        });
-        return;
-      }
-
-      const key = item.nome.toLowerCase();
-
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          id: key,
-          nome: item.nome,
-          cpf: '',
-          cotasOriginais: 0,
-          cotasExibidas: 0,
-          valorPago: 0,
-          individual: false,
-          isAdm: false,
-          valorReceberBase: 0,
-          valorReceberFinal: 0,
-        });
-      }
-
-      const row = grouped.get(key);
-      row.cotasOriginais += cotas;
-      row.valorPago += item.valorPago;
-
-      if (!row.cpf && item.cpf) {
-        row.cpf = item.cpf;
-      }
-    });
-
-    const rows = [...loose, ...Array.from(grouped.values())];
-
-    const totalCotasCalculadas = rows.reduce((sum, row) => sum + row.cotasOriginais, 0);
-    const valorPorCotaCalculado =
-      totalCotasCalculadas > 0 ? valorDistribuido / totalCotasCalculadas : 0;
-
-    rows.forEach((row) => {
-      row.isAdm = adminsAtivos.includes(row.nome);
-      row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
-      row.valorReceberFinal =
-        row.valorReceberBase + (row.isAdm ? valorAdmPorPessoa : 0);
-
-      const cotasBonusAdm =
-        row.isAdm && valorPorCotaCalculado > 0
-          ? valorAdmPorPessoa / valorPorCotaCalculado
+  processedFiles.forEach((item) => {
+    const cotas =
+      item.cotasManual !== undefined && item.cotasManual !== null
+        ? Number(item.cotasManual)
+        : valorCotaNumero > 0
+          ? item.valorPago / valorCotaNumero
           : 0;
 
-      row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
-    });
+    if (!item.nomeConfiavel) {
+      loose.push({
+        id: item.id,
+        nome: item.nome,
+        cpf: item.cpf || '',
+        cotasOriginais: cotas,
+        cotasExibidas: cotas,
+        valorPago: item.valorPago,
+        individual: true,
+        isAdm: false,
+        valorReceberBase: 0,
+        valorReceberFinal: 0,
+      });
+      return;
+    }
 
-    return rows;
-  }, [processedFiles, valorCotaNumero, adminsAtivos, valorAdmPorPessoa, valorDistribuido]);
+    const key = normalizePersonName(item.nome);
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        id: key,
+        nome: item.nome,
+        cpf: '',
+        cotasOriginais: 0,
+        cotasExibidas: 0,
+        valorPago: 0,
+        individual: false,
+        isAdm: false,
+        valorReceberBase: 0,
+        valorReceberFinal: 0,
+      });
+    }
+
+    const row = grouped.get(key);
+    row.cotasOriginais += cotas;
+    row.valorPago += item.valorPago;
+
+    if (!row.cpf && item.cpf) {
+      row.cpf = item.cpf;
+    }
+  });
+
+  const rows = [...loose, ...Array.from(grouped.values())];
+
+  saldosAnteriores.forEach((saldo) => {
+    const key = normalizePersonName(saldo.nome);
+    const valorSaldo = Number(saldo.valor) || 0;
+    const cotasSaldo = valorCotaNumero > 0 ? valorSaldo / valorCotaNumero : 0;
+
+    const existente = rows.find((item) => normalizePersonName(item.nome) === key);
+
+    if (existente) {
+      existente.valorPago += valorSaldo;
+      existente.cotasOriginais += cotasSaldo;
+      return;
+    }
+
+    const encontradoNaBase = findClientByName(saldo.nome, baseClientes);
+
+    rows.push({
+      id: `saldo-${key}`,
+      nome: saldo.nome,
+      cpf: encontradoNaBase?.cpf || '',
+      cotasOriginais: cotasSaldo,
+      cotasExibidas: cotasSaldo,
+      valorPago: valorSaldo,
+      individual: false,
+      isAdm: false,
+      valorReceberBase: 0,
+      valorReceberFinal: 0,
+    });
+  });
+
+  const totalCotasCalculadas = rows.reduce((sum, row) => sum + row.cotasOriginais, 0);
+  const valorPorCotaCalculado =
+    totalCotasCalculadas > 0 ? valorDistribuido / totalCotasCalculadas : 0;
+
+  rows.forEach((row) => {
+    row.isAdm = adminsAtivos.includes(row.nome);
+    row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
+    row.valorReceberFinal =
+      row.valorReceberBase + (row.isAdm ? valorAdmPorPessoa : 0);
+
+    const cotasBonusAdm =
+      row.isAdm && valorPorCotaCalculado > 0
+        ? valorAdmPorPessoa / valorPorCotaCalculado
+        : 0;
+
+    row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
+  });
+
+  return rows;
+}, [
+  processedFiles,
+  saldosAnteriores,
+  baseClientes,
+  valorCotaNumero,
+  adminsAtivos,
+  valorAdmPorPessoa,
+  valorDistribuido,
+]);
 
   const totalPago = consolidatedRows.reduce((sum, row) => sum + row.valorPago, 0);
   const cotasVendidas = consolidatedRows.reduce((sum, row) => sum + row.cotasOriginais, 0);
@@ -1483,6 +1670,15 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
             onChange={importBaseClientes}
           />
 
+          <input
+            ref={saldoInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={importSaldosAnteriores}
+          />
+
+
           {files.length > 0 && (
             <div className="mt-5 space-y-2">
               {files.map((file) => (
@@ -1517,6 +1713,15 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
               ? 'Processando...'
               : `Processar ${files.length || 0} comprovante${files.length === 1 ? '' : 's'}`}
           </button>
+
+          <button
+            type="button"
+            onClick={() => saldoInputRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Importar saldos anteriores
+          </button>      
 
           {error && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1574,6 +1779,8 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
             </div>
 
             {baseInfo && <p className="mt-2 text-sm text-slate-500">{baseInfo}</p>}
+            {saldoInfo && <p className="mt-1 text-sm text-emerald-600">{saldoInfo}</p>}
+
           </div>
         )}
 
