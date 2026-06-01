@@ -51,6 +51,14 @@ const GENERIC_NAME_PATTERNS = [
   /^recebedor\b/i,
 ];
 
+function calculateCotas(valorPago = 0, valorCota = 0) {
+  const pagoCentavos = Math.round(Number(valorPago || 0) * 100);
+  const cotaCentavos = Math.round(Number(valorCota || 0) * 100);
+
+  if (cotaCentavos <= 0) return 0;
+
+  return Number((pagoCentavos / cotaCentavos).toFixed(6));
+}
 
 function formatBRL(value) {
   return Number(value || 0).toLocaleString('pt-BR', {
@@ -60,9 +68,26 @@ function formatBRL(value) {
 }
 
 function parseNumber(value) {
-  if (value === null || value === undefined) return 0;
+  if (value === null || value === undefined || value === '') return 0;
   if (typeof value === 'number') return value;
-  const normalized = String(value).replace(/\./g, '').replace(',', '.');
+
+  const raw = String(value).trim();
+
+  if (!raw) return 0;
+
+  const hasComma = raw.includes(',');
+  const hasDot = raw.includes('.');
+
+  let normalized = raw;
+
+  if (hasComma && hasDot) {
+    normalized = raw.replace(/\./g, '').replace(',', '.');
+  } else if (hasComma) {
+    normalized = raw.replace(',', '.');
+  } else {
+    normalized = raw;
+  }
+
   const parsed = Number(normalized);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
@@ -888,7 +913,7 @@ function findSaldoByName(nome = '', base = []) {
         nomeConfiavel: item.nomeConfiavel,
         confiancaNome: item.confiancaNome,
         valorPago: item.valorPago,
-        cotas: valorCotaNumero > 0 ? item.valorPago / valorCotaNumero : 0,
+        cotas: calculateCotas(item.valorPago, valorCotaNumero),
         rawText: item.rawText,
         cpf: encontradoNaBase?.cpf || '',
       });
@@ -1012,7 +1037,7 @@ function findSaldoByName(nome = '', base = []) {
         nomeConfiavel: true,
         confiancaNome: 'manual',
         valorPago,
-        cotas: valorCotaNumero > 0 ? valorPago / valorCotaNumero : 0,
+        cotas: calculateCotas(valorPago, valorCotaNumero),
         cotasManual: null,
         rawText: 'Lançamento manual sem comprovante anexado.',
         cpf: manualCpf.trim(),
@@ -1089,9 +1114,7 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
     const cotas =
       item.cotasManual !== undefined && item.cotasManual !== null
         ? Number(item.cotasManual)
-        : valorCotaNumero > 0
-          ? item.valorPago / valorCotaNumero
-          : 0;
+        : calculateCotas(item.valorPago, valorCotaNumero);
 
     if (!item.nomeConfiavel) {
       loose.push({
