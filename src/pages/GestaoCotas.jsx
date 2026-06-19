@@ -60,6 +60,84 @@ function calculateCotas(valorPago = 0, valorCota = 0) {
   return Number((pagoCentavos / cotaCentavos).toFixed(6));
 }
 
+function collapseSpacedText(text = '') {
+  return String(text)
+    .replace(/\r/g, '\n')
+    .replace(/\u00A0/g, ' ')
+    .replace(/([A-Za-zÀ-ÿ0-9$])\s(?=[A-Za-zÀ-ÿ0-9$])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function parseCurrencyToNumber(value = '') {
+  const normalized = String(value || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/R\$\s*/gi, '')
+    .replace(/\./g, '')
+    .replace(',', '.')
+    .trim();
+
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function parseExtratoText(rawText = '') {
+  const text = collapseSpacedText(rawText);
+  if (!text) return [];
+
+  const cleaned = text
+    .replace(/ExtratoPer[ií]odo/gi, 'Extrato Período')
+    .replace(/Datalan[cç]amentoDatacont[aá]bilTipoDescri[cç][aã]oValor/gi, ' ')
+    .replace(/Informações sujeitas[\s\S]*$/i, ' ')
+    .replace(/Saldo do dia\s+\d{2}\/\d{2}\/\d{2}\s*R\$\s*[0-9.]+,\d{2}/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const results = [];
+  const seen = new Set();
+
+  const patterns = [
+    /(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+Entrada\s+PIX\s+Pix recebido de\s+(.+?)\s+R\$\s*([0-9.]+,\d{2})/gi,
+    /(\d{2}\/\d{2})(\d{2}\/\d{2})Entrada\s*PIX\s*Pix recebido de\s*(.+?)\s*R\$\s*([0-9.]+,\d{2})/gi,
+  ];
+
+  for (const regex of patterns) {
+    let match;
+    while ((match = regex.exec(cleaned)) !== null) {
+      const dataLancamento = match[1] || '';
+      const dataContabil = match[2] || '';
+      const nomeBruto = cleanupName(match[3] || '');
+      const valor = parseCurrencyToNumber(match[4] || '');
+      const nome = titleCaseName(nomeBruto);
+
+      if (!nome || valor <= 0) continue;
+      if (!isLikelyPersonName(nome)) continue;
+
+      const key = `${normalizePersonName(nome)}|${valor.toFixed(2)}|${dataLancamento}|${dataContabil}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      results.push({
+        id: crypto.randomUUID(),
+        fileName: 'Extrato bancário',
+        nome,
+        nomeConfiavel: true,
+        confiancaNome: 'high',
+        valorPago: valor,
+        cotas: 0,
+        cotasManual: null,
+        rawText: `Extrato: ${dataLancamento} ${dataContabil} PIX recebido de ${nome} ${formatBRL(valor)}`,
+        cpf: '',
+        dataLancamento,
+        dataContabil,
+        origemExtrato: true,
+      });
+    }
+  }
+
+  return results;
+}
+
 function formatBRL(value) {
   return Number(value || 0).toLocaleString('pt-BR', {
     style: 'currency',
@@ -169,14 +247,14 @@ function titleCaseName(value = '') {
 
 
 
-  function normalizePersonName(value = '') {
-    return String(value)
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
+function normalizePersonName(value = '') {
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function findSaldoByName(nome = '', base = []) {
   const alvo = normalizePersonName(nome);
@@ -187,7 +265,7 @@ function findSaldoByName(nome = '', base = []) {
 
 function extractPreferredPayerName(text = '') {
   const cleanedText = normalizeOCRText(text);
-    if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
+  if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
     const hasDestino = /\bdestino\b/i.test(cleanedText);
     const hasOrigem = /\borigem\b/i.test(cleanedText);
 
@@ -195,7 +273,7 @@ function extractPreferredPayerName(text = '') {
       return null;
     }
   }
-    // Nubank: prioriza "Origem > Nome" e evita confundir com "Destino"
+  // Nubank: prioriza "Origem > Nome" e evita confundir com "Destino"
   if (/nubank|nu pagamentos|comprovante de transfer[êe]ncia|pix/i.test(cleanedText)) {
     const nubankOriginMatch = cleanedText.match(
       /origem[\s\S]{0,180}?nome\s+([A-Za-zÀ-ÿ\s]+?)(?:\s+institui[cç][ãa]o|\s+cpf|$)/i
@@ -358,7 +436,7 @@ async function readImageText(file) {
   const {
     data: { text },
   } = await Tesseract.recognize(file, 'por+eng', {
-    logger: () => {},
+    logger: () => { },
   });
 
   return text || '';
@@ -469,8 +547,8 @@ function extractC6PixRecebidos(text, fileName = 'Extrato C6') {
         tipo === 'Entrada PIX'
           ? 'PIX RECEBIDO'
           : tipo === 'Devolução PIX'
-          ? 'DEVOLUCAO PIX'
-          : tipo,
+            ? 'DEVOLUCAO PIX'
+            : tipo,
       nome,
       nomeConfiavel,
       confiancaNome,
@@ -587,6 +665,8 @@ function downloadBlob(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
+
+
 export default function GestaoCotas() {
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
@@ -631,29 +711,19 @@ export default function GestaoCotas() {
   const [saldosAnteriores, setSaldosAnteriores] = useState([]);
   const [saldoInfo, setSaldoInfo] = useState('');
 
-function parseSaldoAmount(value = '') {
+  function parseSaldoAmount(value = '') {
   const raw = String(value || '')
     .replace(/\uFEFF/g, '')
+    .replace(/^"(.*)"$/s, '$1')
     .replace(/^R\$\s*/i, '')
     .trim();
 
   if (!raw) return 0;
 
-  if (/^\d+$/.test(raw)) {
-    return Number(raw) / 100;
-  }
-
-  if (/^\d+,\d{2}$/.test(raw)) {
-    return Number(raw.replace(',', '.'));
-  }
-
-  if (/^\d{1,3}(\.\d{3})+,\d{2}$/.test(raw)) {
-    return Number(raw.replace(/\./g, '').replace(',', '.'));
-  }
-
-  if (/^\d+\.\d{2}$/.test(raw)) {
-    return Number(raw);
-  }
+  if (/^\d+$/.test(raw)) return Number(raw) / 100;
+  if (/^\d+,\d{2}$/.test(raw)) return Number(raw.replace(',', '.'));
+  if (/^\d{1,3}(\.\d{3})+,\d{2}$/.test(raw)) return Number(raw.replace(/\./g, '').replace(',', '.'));
+  if (/^\d+\.\d{2}$/.test(raw)) return Number(raw);
 
   return 0;
 }
@@ -669,6 +739,7 @@ function parseSaldoCsv(text = '') {
   if (!lines.length) return [];
 
   return lines
+    .map((line) => line.replace(/^"(.*)"$/s, '$1').trim())
     .filter((line) => {
       const normalized = line
         .normalize('NFD')
@@ -679,23 +750,28 @@ function parseSaldoCsv(text = '') {
       return normalized !== 'nome;valor' && normalized !== 'nome';
     })
     .map((line) => {
-      const [nome, valorTexto = ''] = line.split(';');
+      const separatorIndex = line.lastIndexOf(';');
+      if (separatorIndex === -1) return null;
+
+      const nome = line.slice(0, separatorIndex).trim().replace(/^"(.*)"$/s, '$1');
+      const valorTexto = line.slice(separatorIndex + 1).trim().replace(/^"(.*)"$/s, '$1');
 
       if (!nome || !valorTexto) return null;
 
       const valor = parseSaldoAmount(valorTexto);
-
-      if (valor <= 0) return null;
+      if (!Number.isFinite(valor) || valor <= 0) return null;
 
       return {
-        nome: titleCaseName(nome.trim()),
+        nome: titleCaseName(nome),
         valor,
       };
     })
     .filter(Boolean);
 }
 
-const importSaldosAnteriores = async (event) => {
+  
+
+  const importSaldosAnteriores = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
 
@@ -703,36 +779,13 @@ const importSaldosAnteriores = async (event) => {
     const text = await file.text();
     const parsed = parseSaldoCsv(text);
 
-    console.log('PARSED SALDOS:', parsed);
-    console.log('VALORES:', parsed.map((item) => item.valor));
-
     if (!parsed.length) {
       setError('A base de saldos não possui registros válidos. Use o formato nome;valor.');
       return;
     }
 
-    console.log('TEXTO CSV:', text);
-    console.log('PARSED SALDOS:', parsed);
-
-    const novosLancamentos = parsed.map((item) => {
-      const encontradoNaBase = findClientByName(item.nome, baseClientes);
-
-      return {
-        id: crypto.randomUUID(),
-        fileName: 'Saldo anterior',
-        nome: item.nome,
-        nomeConfiavel: true,
-        confiancaNome: 'saldo',
-        valorPago: item.valor,
-        cotas: valorCotaNumero > 0 ? item.valor / valorCotaNumero : 0,
-        cotasManual: null,
-        rawText: `Importado por saldo anterior: ${item.nome} - ${formatBRL(item.valor)}`,
-        cpf: encontradoNaBase?.cpf || '',
-      };
-    });
-
-    setProcessedFiles((prev) => [...novosLancamentos, ...prev]);
-    setSaldoInfo(`${novosLancamentos.length} saldo(s) anterior(es) importado(s).`);
+    setSaldosAnteriores(parsed);
+    setSaldoInfo(`${parsed.length} saldo(s) anterior(es) importado(s).`);
     setError('');
   } catch (err) {
     console.error(err);
@@ -741,6 +794,7 @@ const importSaldosAnteriores = async (event) => {
     event.target.value = '';
   }
 };
+
   const handleAccess = () => {
     if (accessPassword === ADMIN_PASSWORD) {
       setAuthenticated(true);
@@ -773,53 +827,40 @@ const importSaldosAnteriores = async (event) => {
     return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
   }
 
-function parseSaldoCsv(text = '') {
-  const cleanedText = String(text || '').replace(/\uFEFF/g, '');
+  function parseBaseCsv(text = '') {
+    const cleanedText = String(text || '').replace(/\uFEFF/g, '');
 
-  const lines = cleanedText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+    const lines = cleanedText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
-  if (!lines.length) return [];
+    if (!lines.length) return [];
 
-  return lines
-    .filter((line) => {
-      const normalized = line
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
+    return lines
+      .filter((line) => {
+        const normalized = line
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .trim();
 
-      return normalized !== 'nome;valor' && normalized !== 'nome';
-    })
-    .map((line) => {
-      const parts = line.split(';');
+        return normalized !== 'nome;cpf' && normalized !== 'nome';
+      })
+      .map((line) => {
+        const parts = line.split(';');
+        if (parts.length < 2) return null;
 
-      if (parts.length < 2) return null;
+        const nome = titleCaseName(parts[0].trim());
+        const cpf = formatCpf(parts[1].trim());
 
-      const nome = parts[0].trim();
-      const valorTexto = parts[1].trim().replace(/\D/g, '');
+        if (!nome) return null;
+        if (sanitizeCpf(cpf).length !== 11) return null;
 
-      if (!nome || !valorTexto) return null;
-
-      const valor = Number(valorTexto) / 100;
-
-      if (!Number.isFinite(valor) || valor <= 0) return null;
-
-      return {
-        nome: titleCaseName(nome),
-        valor,
-      };
-    })
-    .filter(Boolean);
-}
-
-function findSaldoByName(nome = '', base = []) {
-  const alvo = normalizePersonName(nome);
-  return base.find((item) => normalizePersonName(item.nome) === alvo) || null;
-}
-
+        return { nome, cpf };
+      })
+      .filter(Boolean);
+  }
 
   const importBaseClientes = async (event) => {
     const file = event.target.files?.[0];
@@ -882,63 +923,58 @@ function findSaldoByName(nome = '', base = []) {
 
   const processFiles = async () => {
     setError('');
+
     if (!files.length) {
       setError('Selecione pelo menos um comprovante antes de processar.');
       return;
     }
 
     setProcessing(true);
+
     try {
       const results = [];
 
       for (const file of files) {
-  const extractedText = await extractFileText(file);
-  const normalizedText = normalizeBankStatementText(extractedText);
+        const extractedText = await extractFileText(file);
+        const extratoEntries = parseExtratoText(extractedText);
 
-  const isC6Statement =
-    /extrato/i.test(normalizedText) &&
-    /c6/i.test(normalizedText) &&
-    /entrada pix/i.test(normalizedText);
+        if (extratoEntries.length > 0) {
+          extratoEntries.forEach((entry) => {
+            const encontradoNaBase = findClientByName(entry.nome, baseClientes);
 
-  if (isC6Statement) {
-    const c6Entries = extractC6PixRecebidos(normalizedText, file.name);
+            results.push({
+              ...entry,
+              fileName: file.name,
+              cpf: encontradoNaBase?.cpf || '',
+              cotas: calculateCotas(entry.valorPago, valorCotaNumero),
+            });
+          });
 
-    for (const item of c6Entries) {
-      const encontradoNaBase = findClientByName(item.nome, baseClientes);
+          continue;
+        }
 
-      results.push({
-        id: item.id,
-        fileName: item.fileName,
-        nome: item.nome,
-        nomeConfiavel: item.nomeConfiavel,
-        confiancaNome: item.confiancaNome,
-        valorPago: item.valorPago,
-        cotas: calculateCotas(item.valorPago, valorCotaNumero),
-        rawText: item.rawText,
-        cpf: encontradoNaBase?.cpf || '',
-      });
-    }
+        const parsed = extractReceiptData(extractedText, file.name);
+        const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
 
-    continue;
-  }
-
-  const parsed = extractReceiptData(extractedText, file.name);
-  const encontradoNaBase = findClientByName(parsed.nome, baseClientes);
-
-  results.push({
-    id: crypto.randomUUID(),
-    fileName: file.name,
-    nome: parsed.nome,
-    nomeConfiavel: parsed.nomeConfiavel,
-    confiancaNome: parsed.confiancaNome,
-    valorPago: parsed.valorPago,
-    cotas: valorCotaNumero > 0 ? parsed.valorPago / valorCotaNumero : 0,
-    rawText: parsed.originalText,
-    cpf: encontradoNaBase?.cpf || '',
-  });
-}
+        results.push({
+          id: crypto.randomUUID(),
+          fileName: file.name,
+          nome: parsed.nome,
+          nomeConfiavel: parsed.nomeConfiavel,
+          confiancaNome: parsed.confiancaNome,
+          valorPago: parsed.valorPago,
+          cotas: calculateCotas(parsed.valorPago, valorCotaNumero),
+          cotasManual: null,
+          rawText: parsed.originalText,
+          cpf: encontradoNaBase?.cpf || '',
+        });
+      }
 
       setProcessedFiles(results);
+
+      if (!results.length) {
+        setError('Nenhum lançamento válido foi encontrado nos arquivos enviados.');
+      }
     } catch (err) {
       setError(
         'Não foi possível processar os arquivos. Confira se pdfjs-dist está instalado e se o PDF permite extração de texto.'
@@ -975,14 +1011,14 @@ function findSaldoByName(nome = '', base = []) {
       prev.map((item) =>
         item.id === editingId
           ? {
-              ...item,
-              nome: manualName || item.nome,
-              cpf: cpfFinal,
-              valorPago: valorPagoManual > 0 ? valorPagoManual : item.valorPago,
-              nomeConfiavel: isManualValid,
-              confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
-              cotasManual: cotasManual > 0 ? cotasManual : null,
-            }
+            ...item,
+            nome: manualName || item.nome,
+            cpf: cpfFinal,
+            valorPago: valorPagoManual > 0 ? valorPagoManual : item.valorPago,
+            nomeConfiavel: isManualValid,
+            confiancaNome: isManualValid ? 'manual' : item.confiancaNome,
+            cotasManual: cotasManual > 0 ? cotasManual : null,
+          }
           : item
       )
     );
@@ -1058,29 +1094,29 @@ function findSaldoByName(nome = '', base = []) {
   const valorDistribuido = premioNumero > 0 ? premioNumero - valorAdmPremio : 0;
 
   const adminsAtivos = useMemo(() => {
-  if (tipoBolao === 'mensal') {
-    return [admMensal1, admMensal2].filter(Boolean);
-  }
+    if (tipoBolao === 'mensal') {
+      return [admMensal1, admMensal2].filter(Boolean);
+    }
 
-  return [admSelecionado, admSelecionado2]
-    .filter(Boolean)
-    .filter((name, index, arr) => arr.indexOf(name) === index);
-}, [tipoBolao, admSelecionado, admSelecionado2, admMensal1, admMensal2]);
+    return [admSelecionado, admSelecionado2]
+      .filter(Boolean)
+      .filter((name, index, arr) => arr.indexOf(name) === index);
+  }, [tipoBolao, admSelecionado, admSelecionado2, admMensal1, admMensal2]);
 
   const valorAdmPorPessoa =
     adminsAtivos.length > 0 ? valorAdmPremio / adminsAtivos.length : 0;
 
   const mensalInvalido =
-  tipoBolao === 'mensal' &&
-  (!admMensal1 || !admMensal2 || admMensal1 === admMensal2);
+    tipoBolao === 'mensal' &&
+    (!admMensal1 || !admMensal2 || admMensal1 === admMensal2);
 
-const normalInvalido =
-  tipoBolao === 'normal' &&
-  admSelecionado &&
-  admSelecionado2 &&
-  admSelecionado === admSelecionado2;
+  const normalInvalido =
+    tipoBolao === 'normal' &&
+    admSelecionado &&
+    admSelecionado2 &&
+    admSelecionado === admSelecionado2;
 
-const selecaoAdmInvalida = mensalInvalido || normalInvalido;
+  const selecaoAdmInvalida = mensalInvalido || normalInvalido;
 
   const totalCotasSemBonusAdm = processedFiles.reduce((sum, item) => {
     const cotasItem =
@@ -1107,116 +1143,116 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
   }, [processedFiles]);
 
   const consolidatedRows = useMemo(() => {
-  const grouped = new Map();
-  const loose = [];
+    const grouped = new Map();
+    const loose = [];
 
-  processedFiles.forEach((item) => {
-    const cotas =
-      item.cotasManual !== undefined && item.cotasManual !== null
-        ? Number(item.cotasManual)
-        : calculateCotas(item.valorPago, valorCotaNumero);
+    processedFiles.forEach((item) => {
+      const cotas =
+        item.cotasManual !== undefined && item.cotasManual !== null
+          ? Number(item.cotasManual)
+          : calculateCotas(item.valorPago, valorCotaNumero);
 
-    if (!item.nomeConfiavel) {
-      loose.push({
-        id: item.id,
-        nome: item.nome,
-        cpf: item.cpf || '',
-        cotasOriginais: cotas,
-        cotasExibidas: cotas,
-        valorPago: item.valorPago,
-        individual: true,
-        isAdm: false,
-        valorReceberBase: 0,
-        valorReceberFinal: 0,
-      });
-      return;
-    }
+      if (!item.nomeConfiavel) {
+        loose.push({
+          id: item.id,
+          nome: item.nome,
+          cpf: item.cpf || '',
+          cotasOriginais: cotas,
+          cotasExibidas: cotas,
+          valorPago: item.valorPago,
+          individual: true,
+          isAdm: false,
+          valorReceberBase: 0,
+          valorReceberFinal: 0,
+        });
+        return;
+      }
 
-    const key = normalizePersonName(item.nome);
+      const key = normalizePersonName(item.nome);
 
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        id: key,
-        nome: item.nome,
-        cpf: '',
-        cotasOriginais: 0,
-        cotasExibidas: 0,
-        valorPago: 0,
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: key,
+          nome: item.nome,
+          cpf: '',
+          cotasOriginais: 0,
+          cotasExibidas: 0,
+          valorPago: 0,
+          individual: false,
+          isAdm: false,
+          valorReceberBase: 0,
+          valorReceberFinal: 0,
+        });
+      }
+
+      const row = grouped.get(key);
+      row.cotasOriginais += cotas;
+      row.valorPago += item.valorPago;
+
+      if (!row.cpf && item.cpf) {
+        row.cpf = item.cpf;
+      }
+    });
+
+    const rows = [...loose, ...Array.from(grouped.values())];
+
+    saldosAnteriores.forEach((saldo) => {
+      const key = normalizePersonName(saldo.nome);
+      const valorSaldo = Number(saldo.valor) || 0;
+      const cotasSaldo = valorCotaNumero > 0 ? valorSaldo / valorCotaNumero : 0;
+
+      const existente = rows.find((item) => normalizePersonName(item.nome) === key);
+
+      if (existente) {
+        existente.valorPago += valorSaldo;
+        existente.cotasOriginais += cotasSaldo;
+        return;
+      }
+
+      const encontradoNaBase = findClientByName(saldo.nome, baseClientes);
+
+      rows.push({
+        id: `saldo-${key}`,
+        nome: saldo.nome,
+        cpf: encontradoNaBase?.cpf || '',
+        cotasOriginais: cotasSaldo,
+        cotasExibidas: cotasSaldo,
+        valorPago: valorSaldo,
         individual: false,
         isAdm: false,
         valorReceberBase: 0,
         valorReceberFinal: 0,
       });
-    }
-
-    const row = grouped.get(key);
-    row.cotasOriginais += cotas;
-    row.valorPago += item.valorPago;
-
-    if (!row.cpf && item.cpf) {
-      row.cpf = item.cpf;
-    }
-  });
-
-  const rows = [...loose, ...Array.from(grouped.values())];
-
-  saldosAnteriores.forEach((saldo) => {
-    const key = normalizePersonName(saldo.nome);
-    const valorSaldo = Number(saldo.valor) || 0;
-    const cotasSaldo = valorCotaNumero > 0 ? valorSaldo / valorCotaNumero : 0;
-
-    const existente = rows.find((item) => normalizePersonName(item.nome) === key);
-
-    if (existente) {
-      existente.valorPago += valorSaldo;
-      existente.cotasOriginais += cotasSaldo;
-      return;
-    }
-
-    const encontradoNaBase = findClientByName(saldo.nome, baseClientes);
-
-    rows.push({
-      id: `saldo-${key}`,
-      nome: saldo.nome,
-      cpf: encontradoNaBase?.cpf || '',
-      cotasOriginais: cotasSaldo,
-      cotasExibidas: cotasSaldo,
-      valorPago: valorSaldo,
-      individual: false,
-      isAdm: false,
-      valorReceberBase: 0,
-      valorReceberFinal: 0,
     });
-  });
 
-  const totalCotasCalculadas = rows.reduce((sum, row) => sum + row.cotasOriginais, 0);
-  const valorPorCotaCalculado =
-    totalCotasCalculadas > 0 ? valorDistribuido / totalCotasCalculadas : 0;
+    const totalCotasCalculadas = rows.reduce((sum, row) => sum + row.cotasOriginais, 0);
+    const valorPorCotaCalculado =
+      totalCotasCalculadas > 0 ? valorDistribuido / totalCotasCalculadas : 0;
 
-  rows.forEach((row) => {
-    row.isAdm = adminsAtivos.includes(row.nome);
-    row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
-    row.valorReceberFinal =
-      row.valorReceberBase + (row.isAdm ? valorAdmPorPessoa : 0);
+    rows.forEach((row) => {
+      row.isAdm = adminsAtivos.includes(row.nome);
+      row.valorReceberBase = row.cotasOriginais * valorPorCotaCalculado;
+      row.valorReceberFinal =
+        row.valorReceberBase + (row.isAdm ? valorAdmPorPessoa : 0);
 
-    const cotasBonusAdm =
-      row.isAdm && valorPorCotaCalculado > 0
-        ? valorAdmPorPessoa / valorPorCotaCalculado
-        : 0;
+      const cotasBonusAdm =
+        row.isAdm && valorPorCotaCalculado > 0
+          ? valorAdmPorPessoa / valorPorCotaCalculado
+          : 0;
 
-    row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
-  });
+      row.cotasExibidas = row.cotasOriginais + cotasBonusAdm;
+    });
 
-  return rows;
-}, [
-  processedFiles,
-  saldosAnteriores,
-  baseClientes,
-  valorCotaNumero,
-  adminsAtivos,
-  valorAdmPorPessoa,
-  valorDistribuido,
-]);
+    return rows;
+  }, [
+    processedFiles,
+    saldosAnteriores,
+    baseClientes,
+    valorCotaNumero,
+    adminsAtivos,
+    valorAdmPorPessoa,
+    valorDistribuido,
+  ]);
 
   const totalPago = consolidatedRows.reduce((sum, row) => sum + row.valorPago, 0);
   const cotasVendidas = consolidatedRows.reduce((sum, row) => sum + row.cotasOriginais, 0);
@@ -1567,90 +1603,90 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
             </div>
 
             {tipoBolao === 'normal' ? (
-  <>
-    <div className="sm:col-span-3">
-      <label className="text-sm text-slate-500 mb-1.5 block">ADM 1</label>
-      <div className="relative">
-        <select
-          value={admSelecionado}
-          onChange={(e) => setAdmSelecionado(e.target.value)}
-          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-        >
-          <option value="">Selecione o participante</option>
-          {participantOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-      </div>
-    </div>
+              <>
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM 1</label>
+                  <div className="relative">
+                    <select
+                      value={admSelecionado}
+                      onChange={(e) => setAdmSelecionado(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
 
-    <div className="sm:col-span-3">
-      <label className="text-sm text-slate-500 mb-1.5 block">ADM 2</label>
-      <div className="relative">
-        <select
-          value={admSelecionado2}
-          onChange={(e) => setAdmSelecionado2(e.target.value)}
-          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-        >
-          <option value="">Selecione o participante</option>
-          {participantOptions
-            .filter((name) => name !== admSelecionado)
-            .map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-        </select>
-        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-      </div>
-    </div>
-  </>
-) : (
-  <>
-    <div className="sm:col-span-3">
-      <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 1</label>
-      <div className="relative">
-        <select
-          value={admMensal1}
-          onChange={(e) => setAdmMensal1(e.target.value)}
-          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-        >
-          <option value="">Selecione o participante</option>
-          {participantOptions.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-      </div>
-    </div>
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM 2</label>
+                  <div className="relative">
+                    <select
+                      value={admSelecionado2}
+                      onChange={(e) => setAdmSelecionado2(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions
+                        .filter((name) => name !== admSelecionado)
+                        .map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 1</label>
+                  <div className="relative">
+                    <select
+                      value={admMensal1}
+                      onChange={(e) => setAdmMensal1(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
 
-    <div className="sm:col-span-3">
-      <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 2</label>
-      <div className="relative">
-        <select
-          value={admMensal2}
-          onChange={(e) => setAdmMensal2(e.target.value)}
-          className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
-        >
-          <option value="">Selecione o participante</option>
-          {participantOptions
-            .filter((name) => name !== admMensal1)
-            .map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-        </select>
-        <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-      </div>
-    </div>
-  </>
-)}
+                <div className="sm:col-span-3">
+                  <label className="text-sm text-slate-500 mb-1.5 block">ADM mensal 2</label>
+                  <div className="relative">
+                    <select
+                      value={admMensal2}
+                      onChange={(e) => setAdmMensal2(e.target.value)}
+                      className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 outline-none focus:ring-2 focus:ring-blue-200 appearance-none"
+                    >
+                      <option value="">Selecione o participante</option>
+                      {participantOptions
+                        .filter((name) => name !== admMensal1)
+                        .map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                    </select>
+                    <Crown className="h-4 w-4 text-amber-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1744,7 +1780,7 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
           >
             <FileSpreadsheet className="h-4 w-4" />
             Importar saldos anteriores
-          </button>      
+          </button>
 
           {error && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -2041,43 +2077,43 @@ const selecaoAdmInvalida = mensalInvalido || normalInvalido;
                 </div>
 
                 {mensalInvalido && (
-                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-                  <p className="text-sm font-medium text-red-700">
-                    No modo mensal, selecione dois administradores diferentes.
-                  </p>
-                </div>
-              )}
+                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-sm font-medium text-red-700">
+                      No modo mensal, selecione dois administradores diferentes.
+                    </p>
+                  </div>
+                )}
 
-              {normalInvalido && (
-                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-                  <p className="text-sm font-medium text-red-700">
-                    No modo normal, selecione dois administradores diferentes.
-                  </p>
-                </div>
-              )}
+                {normalInvalido && (
+                  <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-sm font-medium text-red-700">
+                      No modo normal, selecione dois administradores diferentes.
+                    </p>
+                  </div>
+                )}
 
                 {adminsAtivos.length > 0 && !selecaoAdmInvalida && (
-  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-    {tipoBolao === 'mensal' ? (
-      <p className="text-sm font-medium text-amber-800">
-        ADMs mensais: <span className="font-bold">{admMensal1}</span> e{' '}
-        <span className="font-bold">{admMensal2}</span> — receberão{' '}
-        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
-      </p>
-    ) : adminsAtivos.length === 2 ? (
-      <p className="text-sm font-medium text-amber-800">
-        ADMs selecionados: <span className="font-bold">{admSelecionado}</span> e{' '}
-        <span className="font-bold">{admSelecionado2}</span> — receberão{' '}
-        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
-      </p>
-    ) : (
-      <p className="text-sm font-medium text-amber-800">
-        ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá{' '}
-        {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
-      </p>
-    )}
-  </div>
-)}
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    {tipoBolao === 'mensal' ? (
+                      <p className="text-sm font-medium text-amber-800">
+                        ADMs mensais: <span className="font-bold">{admMensal1}</span> e{' '}
+                        <span className="font-bold">{admMensal2}</span> — receberão{' '}
+                        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
+                      </p>
+                    ) : adminsAtivos.length === 2 ? (
+                      <p className="text-sm font-medium text-amber-800">
+                        ADMs selecionados: <span className="font-bold">{admSelecionado}</span> e{' '}
+                        <span className="font-bold">{admSelecionado2}</span> — receberão{' '}
+                        {formatBRL(valorAdmPorPessoa)} cada de taxa ADM, além do valor das próprias cotas.
+                      </p>
+                    ) : (
+                      <p className="text-sm font-medium text-amber-800">
+                        ADM selecionado: <span className="font-bold">{admSelecionado}</span> — receberá{' '}
+                        {formatBRL(valorAdmPremio)} de taxa ADM além do valor das próprias cotas.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
